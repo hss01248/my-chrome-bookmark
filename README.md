@@ -7,7 +7,7 @@ MV3 Chrome 扩展：用 Tab + Grid 浏览书签栏，工具栏图标打开全页
 1. 打开 `chrome://extensions`
 2. 开启 **开发者模式**
 3. 点击 **加载已解压的扩展程序**
-4. 选择 **包含 `manifest.json` 的目录**（扩展根目录；当前为 `.worktrees/bookmark-wall`）
+4. 选择 **包含 `manifest.json` 的目录**（本仓库根目录 `/Users/hss/my-chrome-bookmark`）
 5. 点击浏览器工具栏中的扩展图标打开书签墙
 
 ## 开发
