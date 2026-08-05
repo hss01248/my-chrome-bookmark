@@ -5,11 +5,17 @@ import { faviconUrlFor, PLACEHOLDER_FAVICON } from './lib/favicon.js';
 const tabsEl = document.getElementById('tabs');
 const mainEl = document.getElementById('main');
 const searchEl = document.getElementById('search');
+const chromeEl = document.querySelector('.chrome');
 
 /** @type {ReturnType<typeof buildBookmarkWall>} */
 let wall = { tabs: [] };
 let selectedTabId = null;
 const extensionOrigin = chrome.runtime.getURL('/').replace(/\/$/, '');
+
+function syncChromeCompact() {
+  if (!chromeEl) return;
+  chromeEl.classList.toggle('is-compact', mainEl.scrollTop > 8);
+}
 
 function favicon(url) {
   return faviconUrlFor(url, extensionOrigin);
@@ -26,6 +32,8 @@ function renderTabs() {
     btn.addEventListener('click', () => {
       selectedTabId = tab.id;
       searchEl.value = '';
+      mainEl.scrollTop = 0;
+      syncChromeCompact();
       render();
     });
     tabsEl.appendChild(btn);
@@ -143,7 +151,13 @@ async function reload() {
   render();
 }
 
-searchEl.addEventListener('input', () => render());
+searchEl.addEventListener('input', () => {
+  mainEl.scrollTop = 0;
+  syncChromeCompact();
+  render();
+});
+
+mainEl.addEventListener('scroll', syncChromeCompact, { passive: true });
 
 for (const ev of ['onCreated', 'onRemoved', 'onChanged', 'onMoved', 'onChildrenReordered']) {
   chrome.bookmarks[ev].addListener(() => {
@@ -152,3 +166,4 @@ for (const ev of ['onCreated', 'onRemoved', 'onChanged', 'onMoved', 'onChildrenR
 }
 
 reload();
+syncChromeCompact();

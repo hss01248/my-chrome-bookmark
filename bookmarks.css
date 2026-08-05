@@ -11,11 +11,24 @@
 }
 
 * { box-sizing: border-box; }
+html,
+body {
+  height: 100%;
+}
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chrome {
+  flex-shrink: 0;
+  z-index: 10;
+  background: var(--bg);
+  box-shadow: 0 1px 0 var(--border);
 }
 
 .top {
@@ -24,6 +37,22 @@ body {
   gap: 16px;
   padding: 16px 20px 8px;
   flex-wrap: wrap;
+  overflow: hidden;
+  max-height: 120px;
+  opacity: 1;
+  transition:
+    max-height 0.22s ease,
+    opacity 0.18s ease,
+    padding 0.22s ease,
+    margin 0.22s ease;
+}
+.chrome.is-compact .top {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  margin: 0;
+  pointer-events: none;
 }
 .brand {
   margin: 0;
@@ -45,9 +74,8 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 8px 20px 16px;
-  border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, #fbfbfc, var(--bg));
+  padding: 10px 20px 12px;
+  background: var(--bg);
 }
 .tab {
   border: 1px solid var(--border);
@@ -65,7 +93,12 @@ body {
   font-weight: 600;
 }
 
-.main { padding: 16px 20px 40px; }
+.main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px 40px;
+}
 .group { margin-bottom: 24px; }
 .group-title {
   margin: 0 0 10px;
