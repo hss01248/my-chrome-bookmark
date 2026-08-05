@@ -38,6 +38,7 @@ function itemLink(item, { showMeta = false } = {}) {
   a.href = item.url;
   a.target = '_blank';
   a.rel = 'noopener noreferrer';
+  a.title = `${item.title}\n${item.url}`;
 
   const img = document.createElement('img');
   img.src = favicon(item.url);
@@ -49,7 +50,6 @@ function itemLink(item, { showMeta = false } = {}) {
   const title = document.createElement('span');
   title.className = 'item-title';
   title.textContent = item.title;
-  title.title = item.title;
 
   a.append(img, title);
 
