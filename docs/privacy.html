@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>书签墙 - 隐私政策</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+        line-height: 1.6;
+      }
+      body {
+        max-width: 720px;
+        margin: 40px auto;
+        padding: 0 20px 64px;
+      }
+      h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
+      .meta { color: #5f6368; margin-bottom: 2rem; }
+      h2 { font-size: 1.2rem; margin-top: 2rem; }
+      ul { padding-left: 1.25rem; }
+    </style>
+  </head>
+  <body>
+    <h1>书签墙（Bookmark Wall）隐私政策</h1>
+    <p class="meta">生效日期：2026-08-06 · 产品：Chrome 扩展「书签墙」</p>
+
+    <p>
+      「书签墙」用于在本地以 Tab + Grid
+      方式浏览您的 Chrome 书签栏。我们重视您的隐私。本扩展<strong>不会</strong>收集、出售或向第三方上传您的书签内容。
+    </p>
+
+    <h2>1. 我们读取哪些数据</h2>
+    <ul>
+      <li>
+        <strong>书签数据</strong>：通过 Chrome 的
+        <code>bookmarks</code> 权限读取书签栏文件夹与链接（标题、URL、层级），仅用于在扩展页面中展示与搜索。
+      </li>
+      <li>
+        <strong>网站图标</strong>：通过
+        <code>favicon</code> 权限获取书签对应站点的图标，用于卡片显示。
+      </li>
+    </ul>
+
+    <h2>2. 数据如何处理与存储</h2>
+    <ul>
+      <li>书签数据仅在您的浏览器本地读取与渲染。</li>
+      <li>本扩展<strong>不</strong>将书签标题、URL 或其他内容发送到开发者自有服务器。</li>
+      <li>本扩展<strong>不</strong>使用分析 SDK、广告 SDK，也不嵌入第三方追踪脚本。</li>
+      <li>本扩展当前<strong>不</strong>使用 <code>storage</code> 持久化您的书签内容（除浏览器本身的书签存储外）。</li>
+    </ul>
+
+    <h2>3. 权限说明</h2>
+    <ul>
+      <li>
+        <code>bookmarks</code>：读取书签树以展示 Tab / Group /
+        书签网格，并在书签变更时刷新页面。
+      </li>
+      <li>
+        <code>favicon</code>：加载书签站点的 favicon，提升识别效率。
+      </li>
+    </ul>
+
+    <h2>4. 数据分享</h2>
+    <p>我们不会向广告商、数据经纪商或其他第三方出售或分享您的书签数据。</p>
+
+    <h2>5. 儿童隐私</h2>
+    <p>本扩展不面向 13 岁以下儿童，也不会故意收集儿童的个人信息。</p>
+
+    <h2>6. 政策变更</h2>
+    <p>
+      若隐私实践发生变化，我们将更新本页面并调整「生效日期」。重大变更时，建议重新查看本政策。
+    </p>
+
+    <h2>7. 联系方式</h2>
+    <p>
+      如有隐私相关问题，请通过 GitHub 仓库联系开发者：
+      <a href="https://github.com/hss01248/my-chrome-bookmark"
+        >https://github.com/hss01248/my-chrome-bookmark</a
+      >
+      （可提 Issue）。
+    </p>
+  </body>
+</html>

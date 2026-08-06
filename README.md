@@ -14,7 +14,18 @@ MV3 Chrome 扩展：用 Tab + Grid 浏览书签栏，工具栏图标打开全页
 
 ```bash
 npm test
+npm run pack   # 生成 Chrome Web Store 用的 zip：dist/bookmark-wall-<version>.zip
 ```
+
+## 隐私政策
+
+商店上架需要可公网访问的隐私政策 URL。草稿页：`docs/privacy.html`。
+
+可选发布方式（GitHub Pages）：
+
+1. 仓库 Settings → Pages → 选择分支 `main`，目录可先选 `/docs`
+2. 生效后访问类似：`https://hss01248.github.io/my-chrome-bookmark/privacy.html`
+3. 将该 URL 填到 Chrome Web Store 的 Privacy 表单
 
 ## 行为
 
