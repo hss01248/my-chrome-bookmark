@@ -77,6 +77,9 @@ body {
   padding: 10px 20px 12px;
   background: var(--bg);
 }
+.chrome.is-searching .tabs {
+  display: none;
+}
 .tab {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -161,7 +164,12 @@ body {
   overflow-y: auto;
   padding: 16px 20px 40px;
 }
-.group { margin-bottom: 24px; scroll-margin-top: 12px; }
+.group {
+  margin-bottom: 24px;
+  scroll-margin-top: 12px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
+}
 .group-title {
   margin: 0 0 10px;
   font-size: 14px;
@@ -200,6 +208,8 @@ body {
   margin-top: 2px;
 }
 .item-title {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -212,19 +222,30 @@ body {
 }
 .meta {
   display: flex;
-  gap: 6px;
-  flex-shrink: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex: 0 0 auto;
+  max-width: 72px;
+  margin-left: 4px;
 }
 .chip {
   font-size: 11px;
   color: var(--muted);
   background: #eee;
   border-radius: 4px;
-  padding: 2px 6px;
-  max-width: 72px;
+  padding: 1px 5px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.3;
+}
+.chip-group {
+  font-size: 10px;
+  opacity: 0.85;
+  background: transparent;
+  padding: 0 2px;
 }
 
 .empty {
