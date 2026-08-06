@@ -6,6 +6,7 @@ const tabsEl = document.getElementById('tabs');
 const mainEl = document.getElementById('main');
 const searchEl = document.getElementById('search');
 const chromeEl = document.querySelector('.chrome');
+const groupNavEl = document.getElementById('group-nav');
 
 /** @type {ReturnType<typeof buildBookmarkWall>} */
 let wall = { tabs: [] };
@@ -15,6 +16,47 @@ const extensionOrigin = chrome.runtime.getURL('/').replace(/\/$/, '');
 function syncChromeCompact() {
   if (!chromeEl) return;
   chromeEl.classList.toggle('is-compact', mainEl.scrollTop > 8);
+}
+
+function hideGroupNav() {
+  if (!groupNavEl) return;
+  groupNavEl.hidden = true;
+  groupNavEl.innerHTML = '';
+}
+
+function scrollMainToSection(section) {
+  const mainRect = mainEl.getBoundingClientRect();
+  const secRect = section.getBoundingClientRect();
+  const top = mainEl.scrollTop + (secRect.top - mainRect.top) - 8;
+  mainEl.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+}
+
+function renderGroupNav(sections) {
+  if (!groupNavEl) return;
+  groupNavEl.innerHTML = '';
+  if (sections.length <= 1) {
+    groupNavEl.hidden = true;
+    return;
+  }
+  groupNavEl.hidden = false;
+  for (const { id, name, section } of sections) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'group-nav-btn';
+    btn.title = name;
+    btn.dataset.groupId = id;
+    const label = document.createElement('span');
+    label.className = 'group-nav-btn-label';
+    label.textContent = name;
+    btn.appendChild(label);
+    btn.addEventListener('click', () => {
+      for (const b of groupNavEl.querySelectorAll('.group-nav-btn')) {
+        b.classList.toggle('is-active', b === btn);
+      }
+      scrollMainToSection(section);
+    });
+    groupNavEl.appendChild(btn);
+  }
 }
 
 function favicon(url) {
@@ -78,12 +120,18 @@ function itemLink(item, { showMeta = false } = {}) {
 function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
   mainEl.innerHTML = '';
   if (!groups.length) {
+    hideGroupNav();
     mainEl.innerHTML = `<p class="empty">这里还没有书签</p>`;
     return;
   }
-  for (const group of groups) {
+  /** @type {{ id: string, name: string, section: HTMLElement }[]} */
+  const navSections = [];
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i];
+    const id = `group-${i}`;
     const section = document.createElement('section');
     section.className = 'group';
+    section.id = id;
     const onlyUnnamed =
       hideSingleUnnamedTitle &&
       groups.length === 1 &&
@@ -101,10 +149,13 @@ function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
     }
     section.appendChild(grid);
     mainEl.appendChild(section);
+    navSections.push({ id, name: group.name, section });
   }
+  renderGroupNav(navSections);
 }
 
 function renderSearchResults(query) {
+  hideGroupNav();
   const hits = searchBookmarkWall(wall, query);
   mainEl.innerHTML = '';
   if (!hits.length) {
@@ -127,6 +178,7 @@ function render() {
     return;
   }
   if (!wall.tabs.length) {
+    hideGroupNav();
     mainEl.innerHTML = `<p class="empty">书签栏还没有内容</p>`;
     return;
   }
