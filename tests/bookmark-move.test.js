@@ -2,8 +2,10 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   adjustIndexForSameParentMove,
+  isNoOpFolderReorder,
   isNoOpVisualReorder,
   resolveDropDestination,
+  resolveFolderReorderDestination,
 } from '../lib/bookmark-move.js';
 
 describe('isNoOpVisualReorder', () => {
@@ -185,6 +187,79 @@ describe('resolveDropDestination', () => {
         ],
       }),
       { parentId: 'g1', index: 2 }
+    );
+  });
+});
+
+describe('resolveFolderReorderDestination', () => {
+  it('inserts before a sibling folder id', () => {
+    assert.deepEqual(
+      resolveFolderReorderDestination({
+        parentId: 'bar',
+        draggedId: 't1',
+        beforeId: 't3',
+        childIds: ['t1', 't2', 't3', 'link'],
+      }),
+      { parentId: 'bar', index: 2 }
+    );
+  });
+
+  it('appends when beforeId is null', () => {
+    assert.deepEqual(
+      resolveFolderReorderDestination({
+        parentId: 'bar',
+        draggedId: 't1',
+        beforeId: null,
+        childIds: ['t1', 't2', 't3'],
+      }),
+      { parentId: 'bar', index: 3 }
+    );
+  });
+
+  it('appends when beforeId missing from childIds', () => {
+    assert.deepEqual(
+      resolveFolderReorderDestination({
+        parentId: 'tab',
+        draggedId: 'g1',
+        beforeId: 'ghost',
+        childIds: ['g1', 'g2'],
+      }),
+      { parentId: 'tab', index: 2 }
+    );
+  });
+});
+
+describe('isNoOpFolderReorder', () => {
+  it('is true when beforeId is the next folder after dragged among folderIds', () => {
+    assert.equal(
+      isNoOpFolderReorder({
+        draggedId: 'g1',
+        beforeId: 'g2',
+        folderIds: ['g1', 'g2', 'g3'],
+      }),
+      true
+    );
+  });
+
+  it('is true when beforeId null and dragged is last folder', () => {
+    assert.equal(
+      isNoOpFolderReorder({
+        draggedId: 'g3',
+        beforeId: null,
+        folderIds: ['g1', 'g2', 'g3'],
+      }),
+      true
+    );
+  });
+
+  it('is false when moving earlier', () => {
+    assert.equal(
+      isNoOpFolderReorder({
+        draggedId: 'g2',
+        beforeId: 'g1',
+        folderIds: ['g1', 'g2', 'g3'],
+      }),
+      false
     );
   });
 });
