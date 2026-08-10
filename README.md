@@ -150,9 +150,10 @@ tests/                 # 单测
 
 公网地址（填商店 Privacy 表单用）：
 
-**https://hss01248.github.io/my-chrome-bookmark/privacy.html**
+- GitHub Pages：https://hss01248.github.io/my-chrome-bookmark/privacy.html  
+- 国内访问更稳时：用 Cloudflare Pages 再部署一份（步骤见 [`docs/cloudflare-pages.md`](cloudflare-pages.md)），商店改填其 `*.pages.dev` URL。
 
-源文件：`docs/privacy.html`。修改后 push 到 `main` 会触发 GitHub Actions 自动更新 Pages。
+源文件：`docs/privacy.html`。修改后 push 到 `main` 会触发 GitHub Actions 更新 GitHub Pages；若接了 Cloudflare Git 集成，也会自动更新。
 
 ---
 
