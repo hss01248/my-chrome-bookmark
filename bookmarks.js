@@ -91,8 +91,8 @@ let dragSession = null;
  * }}
  */
 let folderDragSession = null;
-/** Swallow the click that follows an active tab folder drag. */
-let suppressTabClick = false;
+/** Swallow tab clicks until this time (after an active tab folder drag). */
+let suppressTabClickUntil = 0;
 /** Cached bookmark bar folder id (Chrome usually `'1'`). */
 let bookmarkBarId = '1';
 /** @type {HTMLElement | null} */
@@ -236,10 +236,7 @@ function renderTabs() {
     }
     btn.setAttribute('aria-selected', String(tab.id === selectedTabId));
     btn.addEventListener('click', () => {
-      if (suppressTabClick) {
-        suppressTabClick = false;
-        return;
-      }
+      if (Date.now() < suppressTabClickUntil) return;
       if (tab.id === selectedTabId && !searchEl.value.trim()) return;
       selectedTabId = tab.id;
       searchEl.value = '';
@@ -748,7 +745,7 @@ function setSearching(isSearching) {
 
 function render() {
   cleanupDragSession();
-  cleanupFolderDragSession({ resetTabClickSuppress: true });
+  cleanupFolderDragSession({ clearTabClickSuppress: true });
   rememberScrollPreserve();
   const q = searchEl.value.trim();
   if (q) {
@@ -1170,12 +1167,12 @@ function positionFolderGhost(x, y) {
 }
 
 /**
- * @param {{ resetTabClickSuppress?: boolean }} [opts]
+ * @param {{ clearTabClickSuppress?: boolean }} [opts]
  */
 function cleanupFolderDragSession(opts = {}) {
-  const { resetTabClickSuppress = false } = opts;
+  const { clearTabClickSuppress = false } = opts;
   if (!folderDragSession) {
-    if (resetTabClickSuppress) suppressTabClick = false;
+    if (clearTabClickSuppress) suppressTabClickUntil = 0;
     return;
   }
   const session = folderDragSession;
@@ -1191,7 +1188,7 @@ function cleanupFolderDragSession(opts = {}) {
   } catch {
     /* ignore */
   }
-  if (resetTabClickSuppress) suppressTabClick = false;
+  if (clearTabClickSuppress) suppressTabClickUntil = 0;
 }
 
 function activateFolderDragSession() {
@@ -1199,7 +1196,9 @@ function activateFolderDragSession() {
   folderDragSession.active = true;
 
   const { sourceEl, pointerId, startX, startY, kind } = folderDragSession;
-  if (kind === 'tab') suppressTabClick = true;
+  if (kind === 'tab') {
+    suppressTabClickUntil = Date.now() + SUPPRESS_CLICK_MS;
+  }
 
   sourceEl.classList.add('is-folder-dragging');
   hideContextMenu();
@@ -1397,7 +1396,7 @@ async function onFolderDragPointerUp(event) {
   }
 
   if (!folderDragSession.active) {
-    cleanupFolderDragSession({ resetTabClickSuppress: true });
+    cleanupFolderDragSession({ clearTabClickSuppress: true });
     return;
   }
 
@@ -1423,7 +1422,7 @@ function onFolderDragPointerCancel(event) {
   if (!folderDragSession || event.pointerId !== folderDragSession.pointerId) {
     return;
   }
-  cleanupFolderDragSession({ resetTabClickSuppress: true });
+  cleanupFolderDragSession({ clearTabClickSuppress: true });
 }
 
 /**
@@ -1434,7 +1433,7 @@ function onFolderDragLostPointerCapture(event) {
     return;
   }
   if (!folderDragSession.active) return;
-  cleanupFolderDragSession({ resetTabClickSuppress: true });
+  cleanupFolderDragSession({ clearTabClickSuppress: true });
 }
 
 document.addEventListener('pointerdown', onFolderDragPointerDown);
@@ -1482,7 +1481,7 @@ document.addEventListener('keydown', (event) => {
     cleanupDragSession();
   }
   if (folderDragSession) {
-    cleanupFolderDragSession({ resetTabClickSuppress: true });
+    cleanupFolderDragSession({ clearTabClickSuppress: true });
   }
   hideContextMenu();
   hideEditPopover();
