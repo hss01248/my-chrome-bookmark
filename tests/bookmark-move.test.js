@@ -73,54 +73,56 @@ describe('isNoOpVisualReorder', () => {
 });
 
 describe('adjustIndexForSameParentMove', () => {
-  it('keeps index when moving upward (newIndex < oldIndex)', () => {
+  it('documents legacy SO workaround (not used by resolveDropDestination)', () => {
     assert.equal(adjustIndexForSameParentMove(3, 1), 1);
-  });
-
-  it('increments when moving downward (newIndex > oldIndex)', () => {
-    // Visual "insert before index 3" while item is at 1 → Chrome needs 4
-    assert.equal(adjustIndexForSameParentMove(1, 3), 4);
-  });
-
-  it('no-ops when equal', () => {
+    assert.equal(adjustIndexForSameParentMove(0, 1), 2);
     assert.equal(adjustIndexForSameParentMove(2, 2), 2);
   });
 });
 
 describe('resolveDropDestination', () => {
-  const dragged = { id: 'a', parentId: 'g1', index: 0 };
+  const visualABC = [
+    { id: 'a', parentId: 'g1', index: 0 },
+    { id: 'b', parentId: 'g1', index: 1 },
+    { id: 'c', parentId: 'g1', index: 2 },
+  ];
 
-  it('appends within same folder', () => {
+  it('moves A before C using C index in current child list (Chrome decrements)', () => {
     assert.deepEqual(
       resolveDropDestination({
-        dragged,
+        dragged: { id: 'a', parentId: 'g1', index: 0 },
         targetFolderId: 'g1',
-        beforeItem: null,
-        folderChildCount: 3,
-        visualItems: [
-          { id: 'a', parentId: 'g1', index: 0 },
-          { id: 'b', parentId: 'g1', index: 1 },
-          { id: 'c', parentId: 'g1', index: 2 },
-        ],
+        beforeItem: { id: 'c', parentId: 'g1', index: 2 },
+        childIds: ['a', 'b', 'c'],
+        visualItems: visualABC,
       }),
-      { parentId: 'g1', index: adjustIndexForSameParentMove(0, 3) }
+      { parentId: 'g1', index: 2 }
     );
   });
 
-  it('inserts before a same-folder sibling (move down)', () => {
+  it('appends A using childIds.length', () => {
     assert.deepEqual(
       resolveDropDestination({
-        dragged,
+        dragged: { id: 'a', parentId: 'g1', index: 0 },
         targetFolderId: 'g1',
-        beforeItem: { id: 'c', parentId: 'g1', index: 2 },
-        folderChildCount: 3,
-        visualItems: [
-          { id: 'a', parentId: 'g1', index: 0 },
-          { id: 'b', parentId: 'g1', index: 1 },
-          { id: 'c', parentId: 'g1', index: 2 },
-        ],
+        beforeItem: null,
+        childIds: ['a', 'b', 'c'],
+        visualItems: visualABC,
       }),
-      { parentId: 'g1', index: adjustIndexForSameParentMove(0, 2) }
+      { parentId: 'g1', index: 3 }
+    );
+  });
+
+  it('moves C before A', () => {
+    assert.deepEqual(
+      resolveDropDestination({
+        dragged: { id: 'c', parentId: 'g1', index: 2 },
+        targetFolderId: 'g1',
+        beforeItem: { id: 'a', parentId: 'g1', index: 0 },
+        childIds: ['a', 'b', 'c'],
+        visualItems: visualABC,
+      }),
+      { parentId: 'g1', index: 0 }
     );
   });
 
@@ -130,7 +132,7 @@ describe('resolveDropDestination', () => {
         dragged: { id: 'a', parentId: 'g1', index: 1 },
         targetFolderId: 'g2',
         beforeItem: { id: 'x', parentId: 'g2', index: 0 },
-        folderChildCount: 2,
+        childIds: ['x', 'y'],
         visualItems: [
           { id: 'x', parentId: 'g2', index: 0 },
           { id: 'y', parentId: 'g2', index: 1 },
@@ -140,13 +142,13 @@ describe('resolveDropDestination', () => {
     );
   });
 
-  it('before a deep item uses next same-folder sibling index', () => {
+  it('before a deep item uses next same-folder sibling id index', () => {
     assert.deepEqual(
       resolveDropDestination({
         dragged: { id: 'a', parentId: 'g1', index: 0 },
         targetFolderId: 'g2',
         beforeItem: { id: 'deep', parentId: 'nested', index: 0 },
-        folderChildCount: 2,
+        childIds: ['x', 'y'],
         visualItems: [
           { id: 'deep', parentId: 'nested', index: 0 },
           { id: 'x', parentId: 'g2', index: 0 },
@@ -163,10 +165,26 @@ describe('resolveDropDestination', () => {
         dragged: { id: 'a', parentId: 'g1', index: 0 },
         targetFolderId: 'g2',
         beforeItem: { id: 'deep', parentId: 'nested', index: 0 },
-        folderChildCount: 1,
+        childIds: ['folder-only'],
         visualItems: [{ id: 'deep', parentId: 'nested', index: 0 }],
       }),
       { parentId: 'g2', index: 1 }
+    );
+  });
+
+  it('maps before bookmark across sibling folder in childIds', () => {
+    assert.deepEqual(
+      resolveDropDestination({
+        dragged: { id: 'a', parentId: 'g1', index: 0 },
+        targetFolderId: 'g1',
+        beforeItem: { id: 'c', parentId: 'g1', index: 2 },
+        childIds: ['a', 'f', 'c'],
+        visualItems: [
+          { id: 'a', parentId: 'g1', index: 0 },
+          { id: 'c', parentId: 'g1', index: 2 },
+        ],
+      }),
+      { parentId: 'g1', index: 2 }
     );
   });
 });

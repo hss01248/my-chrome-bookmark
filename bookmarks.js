@@ -862,7 +862,7 @@ async function commitBookmarkMove(dragged, targetFolderId, beforeItem, visualIte
     dragged,
     targetFolderId,
     beforeItem,
-    folderChildCount: children.length,
+    childIds: children.map((c) => c.id),
     visualItems,
   });
   if (
