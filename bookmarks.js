@@ -6,6 +6,7 @@ import {
   createArgsFromSnapshot,
 } from './lib/bookmark-delete.js';
 import { normalizeBookmarkUpdate } from './lib/bookmark-edit.js';
+import { resolveDropDestination } from './lib/bookmark-move.js';
 
 const tabsEl = document.getElementById('tabs');
 const mainEl = document.getElementById('main');
@@ -22,6 +23,10 @@ const extensionOrigin = chrome.runtime.getURL('/').replace(/\/$/, '');
 let renderGeneration = 0;
 const ITEM_CHUNK = 48;
 const UNDO_TOAST_MS = 5000;
+const LONG_PRESS_MS = 400;
+const LONG_PRESS_MOVE_TOLERANCE_PX = 8;
+const STATUS_TOAST_MS = 2000;
+const SUPPRESS_CLICK_MS = 500;
 
 /** @type {{ timer: ReturnType<typeof setTimeout>, snapshot: import('./lib/bookmark-delete.js').UndoSnapshot } | null} */
 let pendingUndo = null;
@@ -33,6 +38,41 @@ let contextMenuEl = null;
 let editPopoverEl = null;
 /** @type {string | null} */
 let editingBookmarkId = null;
+/** @type {number} */
+let suppressClickUntil = 0;
+/** @type {HTMLElement | null} */
+let dropIndicatorEl = null;
+/**
+ * @type {null | {
+ *   pointerId: number,
+ *   sourceEl: HTMLElement,
+ *   dragged: { id: string, parentId: string, index: number },
+ *   ghost: HTMLElement | null,
+ *   timer: ReturnType<typeof setTimeout> | null,
+ *   startX: number,
+ *   startY: number,
+ *   active: boolean,
+ *   targetFolderId: string | null,
+ *   beforeItem: { id: string, parentId: string, index: number } | null,
+ *   visualItems: { id: string, parentId: string, index: number }[],
+ * }}
+ */
+let dragSession = null;
+
+/**
+ * @param {Element | null} el
+ * @returns {{ id: string, parentId: string, index: number } | null}
+ */
+function itemRefFromEl(el) {
+  if (!(el instanceof HTMLElement)) return null;
+  const id = el.dataset.bookmarkId;
+  if (!id) return null;
+  return {
+    id,
+    parentId: el.dataset.parentId || '',
+    index: Number(el.dataset.index || 0),
+  };
+}
 
 function syncChromeCompact() {
   if (!chromeEl) return;
@@ -209,6 +249,27 @@ function clearPendingUndo() {
     clearTimeout(pendingUndo.timer);
     pendingUndo = null;
   }
+}
+
+/**
+ * @param {string} message
+ * @param {number} [ms]
+ */
+function showStatusToast(message, ms = STATUS_TOAST_MS) {
+  clearPendingUndo();
+  const el = ensureToastEl();
+  el.innerHTML = '';
+  el.hidden = false;
+  const label = document.createElement('span');
+  label.className = 'toast-label';
+  label.textContent = message;
+  el.appendChild(label);
+  setTimeout(() => {
+    if (toastEl === el && !pendingUndo) {
+      el.hidden = true;
+      el.innerHTML = '';
+    }
+  }, ms);
 }
 
 /**
@@ -615,6 +676,307 @@ mainEl.addEventListener(
   { passive: true }
 );
 
+function ensureDropIndicator() {
+  if (dropIndicatorEl) return dropIndicatorEl;
+  dropIndicatorEl = document.createElement('div');
+  dropIndicatorEl.className = 'drop-indicator';
+  return dropIndicatorEl;
+}
+
+function clearDropTargetUi() {
+  for (const el of mainEl.querySelectorAll('.group.is-drop-target')) {
+    el.classList.remove('is-drop-target');
+  }
+  dropIndicatorEl?.remove();
+}
+
+function positionGhost(x, y) {
+  const ghost = dragSession?.ghost;
+  if (!ghost) return;
+  ghost.style.left = `${x}px`;
+  ghost.style.top = `${y}px`;
+}
+
+/**
+ * Whether pointer has visually passed this item in grid reading order.
+ * @param {number} x
+ * @param {number} y
+ * @param {HTMLElement} el
+ */
+function isPointerAfterItem(x, y, el) {
+  const box = el.getBoundingClientRect();
+  if (y < box.top) return false;
+  if (y > box.bottom) return true;
+  return x >= box.left + box.width / 2;
+}
+
+/**
+ * @param {HTMLElement} grid
+ * @param {number} clientX
+ * @param {number} clientY
+ * @param {string} excludeId
+ * @returns {HTMLElement | null}
+ */
+function findInsertBeforeEl(grid, clientX, clientY, excludeId) {
+  const items = [...grid.querySelectorAll('.item[data-bookmark-id]')].filter(
+    (el) => el instanceof HTMLElement && el.dataset.bookmarkId !== excludeId
+  );
+  for (const el of items) {
+    if (!isPointerAfterItem(clientX, clientY, el)) return el;
+  }
+  return null;
+}
+
+function updateDropTarget(clientX, clientY) {
+  if (!dragSession?.active) return;
+
+  let hit = document.elementFromPoint(clientX, clientY);
+  if (hit === dragSession.ghost || dragSession.ghost?.contains(hit)) {
+    const ghost = dragSession.ghost;
+    const prev = ghost.style.display;
+    ghost.style.display = 'none';
+    hit = document.elementFromPoint(clientX, clientY);
+    ghost.style.display = prev;
+  }
+
+  clearDropTargetUi();
+  dragSession.targetFolderId = null;
+  dragSession.beforeItem = null;
+  dragSession.visualItems = [];
+
+  const group =
+    hit instanceof Element
+      ? hit.closest('.group[data-folder-id]')
+      : null;
+  if (!(group instanceof HTMLElement) || !mainEl.contains(group)) return;
+
+  const folderId = group.dataset.folderId;
+  if (!folderId) return;
+
+  const grid = group.querySelector('.grid');
+  if (!(grid instanceof HTMLElement)) return;
+
+  group.classList.add('is-drop-target');
+  const beforeEl = findInsertBeforeEl(
+    grid,
+    clientX,
+    clientY,
+    dragSession.dragged.id
+  );
+  const indicator = ensureDropIndicator();
+  if (beforeEl) {
+    grid.insertBefore(indicator, beforeEl);
+  } else {
+    grid.appendChild(indicator);
+  }
+
+  dragSession.targetFolderId = folderId;
+  dragSession.beforeItem = beforeEl ? itemRefFromEl(beforeEl) : null;
+  dragSession.visualItems = [...grid.querySelectorAll('.item[data-bookmark-id]')]
+    .map((el) => itemRefFromEl(el))
+    .filter(Boolean);
+}
+
+function activateDragSession() {
+  if (!dragSession || dragSession.active) return;
+  dragSession.active = true;
+  dragSession.timer = null;
+  suppressClickUntil = Date.now() + SUPPRESS_CLICK_MS;
+
+  const { sourceEl, pointerId, startX, startY } = dragSession;
+  sourceEl.classList.remove('is-drag-pending');
+  sourceEl.classList.add('is-dragging');
+  hideContextMenu();
+  hideEditPopover();
+
+  const ghost = /** @type {HTMLElement} */ (sourceEl.cloneNode(true));
+  ghost.classList.add('drag-ghost');
+  ghost.classList.remove('is-dragging', 'is-drag-pending');
+  ghost.removeAttribute('href');
+  ghost.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(ghost);
+  dragSession.ghost = ghost;
+  document.body.classList.add('is-bookmark-dragging');
+  positionGhost(startX, startY);
+
+  try {
+    sourceEl.setPointerCapture(pointerId);
+  } catch {
+    /* ignore */
+  }
+
+  updateDropTarget(startX, startY);
+}
+
+function cleanupDragSession() {
+  if (!dragSession) return;
+  const session = dragSession;
+  dragSession = null;
+  if (session.timer) {
+    clearTimeout(session.timer);
+    session.timer = null;
+  }
+  session.sourceEl.classList.remove('is-dragging', 'is-drag-pending');
+  session.ghost?.remove();
+  document.body.classList.remove('is-bookmark-dragging');
+  clearDropTargetUi();
+  try {
+    if (session.sourceEl.hasPointerCapture(session.pointerId)) {
+      session.sourceEl.releasePointerCapture(session.pointerId);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * @param {{ id: string, parentId: string, index: number }} dragged
+ * @param {string} targetFolderId
+ * @param {{ id: string, parentId: string, index: number } | null} beforeItem
+ * @param {{ id: string, parentId: string, index: number }[]} visualItems
+ */
+async function commitBookmarkMove(dragged, targetFolderId, beforeItem, visualItems) {
+  const children = await chrome.bookmarks.getChildren(targetFolderId);
+  const destination = resolveDropDestination({
+    dragged,
+    targetFolderId,
+    beforeItem,
+    folderChildCount: children.length,
+    visualItems,
+  });
+  if (
+    destination.parentId === dragged.parentId &&
+    destination.index === dragged.index
+  ) {
+    return;
+  }
+  await chrome.bookmarks.move(dragged.id, destination);
+}
+
+/**
+ * @param {PointerEvent} event
+ */
+function onDragPointerDown(event) {
+  if (event.button !== 0) return;
+  if (dragSession) return;
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  if (target.closest('.item-action')) return;
+
+  const item = target.closest('.item[data-draggable-item="1"]');
+  if (!(item instanceof HTMLElement) || !mainEl.contains(item)) return;
+
+  const dragged = itemRefFromEl(item);
+  if (!dragged) return;
+
+  dragSession = {
+    pointerId: event.pointerId,
+    sourceEl: item,
+    dragged,
+    ghost: null,
+    timer: null,
+    startX: event.clientX,
+    startY: event.clientY,
+    active: false,
+    targetFolderId: null,
+    beforeItem: null,
+    visualItems: [],
+  };
+  item.classList.add('is-drag-pending');
+  dragSession.timer = setTimeout(() => {
+    activateDragSession();
+  }, LONG_PRESS_MS);
+}
+
+/**
+ * @param {PointerEvent} event
+ */
+function onDragPointerMove(event) {
+  if (!dragSession || event.pointerId !== dragSession.pointerId) return;
+
+  if (!dragSession.active) {
+    const dx = event.clientX - dragSession.startX;
+    const dy = event.clientY - dragSession.startY;
+    if (Math.hypot(dx, dy) > LONG_PRESS_MOVE_TOLERANCE_PX) {
+      dragSession.sourceEl.classList.remove('is-drag-pending');
+      cleanupDragSession();
+    }
+    return;
+  }
+
+  positionGhost(event.clientX, event.clientY);
+  updateDropTarget(event.clientX, event.clientY);
+}
+
+/**
+ * @param {PointerEvent} event
+ */
+async function onDragPointerUp(event) {
+  if (!dragSession || event.pointerId !== dragSession.pointerId) return;
+
+  if (!dragSession.active) {
+    cleanupDragSession();
+    return;
+  }
+
+  suppressClickUntil = Date.now() + SUPPRESS_CLICK_MS;
+  const { dragged, targetFolderId, beforeItem, visualItems } = dragSession;
+  cleanupDragSession();
+
+  if (!targetFolderId) return;
+
+  try {
+    await commitBookmarkMove(dragged, targetFolderId, beforeItem, visualItems);
+  } catch (err) {
+    console.error('Failed to move bookmark', err);
+    showStatusToast('移动失败');
+  }
+}
+
+/**
+ * @param {PointerEvent} event
+ */
+function onDragPointerCancel(event) {
+  if (!dragSession || event.pointerId !== dragSession.pointerId) return;
+  cleanupDragSession();
+}
+
+/**
+ * @param {PointerEvent} event
+ */
+function onDragLostPointerCapture(event) {
+  if (!dragSession || event.pointerId !== dragSession.pointerId) return;
+  if (!dragSession.active) return;
+  cleanupDragSession();
+}
+
+mainEl.addEventListener('pointerdown', onDragPointerDown);
+mainEl.addEventListener('pointermove', onDragPointerMove);
+mainEl.addEventListener('pointerup', onDragPointerUp);
+mainEl.addEventListener('pointercancel', onDragPointerCancel);
+mainEl.addEventListener('lostpointercapture', onDragLostPointerCapture);
+
+mainEl.addEventListener(
+  'click',
+  (event) => {
+    if (Date.now() >= suppressClickUntil) return;
+    event.preventDefault();
+    event.stopPropagation();
+  },
+  true
+);
+
+mainEl.addEventListener(
+  'contextmenu',
+  (event) => {
+    if (!dragSession) return;
+    event.preventDefault();
+    event.stopPropagation();
+    hideContextMenu();
+  },
+  true
+);
+
 document.addEventListener('click', (event) => {
   const target = /** @type {Node} */ (event.target);
   if (contextMenuEl && !contextMenuEl.hidden && !contextMenuEl.contains(target)) {
@@ -629,6 +991,9 @@ document.addEventListener('click', (event) => {
 
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
+  if (dragSession) {
+    cleanupDragSession();
+  }
   hideContextMenu();
   hideEditPopover();
 });
