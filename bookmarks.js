@@ -66,6 +66,11 @@ let dropIndicatorEl = null;
 let dragSession = null;
 /** Blocks new long-press while a move API call is in flight. */
 let moveInFlight = false;
+/**
+ * How to restore main scroll after a re-render.
+ * @type {null | { mode: 'preserve', top: number } | { mode: 'bookmark', id: string, top: number }}
+ */
+let scrollAfterRender = null;
 
 /**
  * @param {Element | null} el
@@ -134,6 +139,40 @@ function favicon(url) {
 
 function nextFrame() {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+function rememberScrollPreserve() {
+  if (!scrollAfterRender) {
+    scrollAfterRender = { mode: 'preserve', top: mainEl.scrollTop };
+  }
+}
+
+function rememberScrollToBookmark(id) {
+  scrollAfterRender = {
+    mode: 'bookmark',
+    id,
+    top: mainEl.scrollTop,
+  };
+}
+
+function applyScrollAfterRender() {
+  const plan = scrollAfterRender;
+  scrollAfterRender = null;
+  if (!plan) return;
+
+  if (plan.mode === 'bookmark') {
+    const el = mainEl.querySelector(
+      `.item[data-bookmark-id="${plan.id}"]`
+    );
+    if (el instanceof HTMLElement) {
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      syncChromeCompact();
+      return;
+    }
+  }
+
+  mainEl.scrollTop = plan.top;
+  syncChromeCompact();
 }
 
 function renderTabs() {
@@ -564,6 +603,7 @@ async function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
   if (!groups.length) {
     hideGroupNav();
     mainEl.innerHTML = `<p class="empty">这里还没有书签</p>`;
+    applyScrollAfterRender();
     return;
   }
 
@@ -613,6 +653,8 @@ async function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
     const ok = await fillGridChunked(job.grid, job.items, generation);
     if (!ok) return;
   }
+  if (generation !== renderGeneration) return;
+  applyScrollAfterRender();
 }
 
 async function renderSearchResults(query) {
@@ -623,13 +665,16 @@ async function renderSearchResults(query) {
 
   if (!hits.length) {
     mainEl.innerHTML = `<p class="empty">无匹配书签</p>`;
+    applyScrollAfterRender();
     return;
   }
 
   const grid = document.createElement('div');
   grid.className = 'grid';
   mainEl.appendChild(grid);
-  await fillGridChunked(grid, hits, generation, { showMeta: true });
+  const ok = await fillGridChunked(grid, hits, generation, { showMeta: true });
+  if (!ok) return;
+  applyScrollAfterRender();
 }
 
 function setSearching(isSearching) {
@@ -638,6 +683,7 @@ function setSearching(isSearching) {
 
 function render() {
   cleanupDragSession();
+  rememberScrollPreserve();
   const q = searchEl.value.trim();
   if (q) {
     setSearching(true);
@@ -651,6 +697,7 @@ function render() {
     hideGroupNav();
     mainEl.innerHTML = `<p class="empty">书签栏还没有内容</p>`;
     renderTabs();
+    applyScrollAfterRender();
     return;
   }
   const tab = wall.tabs.find((t) => t.id === selectedTabId) || wall.tabs[0];
@@ -870,6 +917,9 @@ async function commitBookmarkMove(dragged, targetFolderId, beforeItem, visualIte
     destination.index === dragged.index
   ) {
     return;
+  }
+  if (destination.parentId !== dragged.parentId) {
+    rememberScrollToBookmark(dragged.id);
   }
   await chrome.bookmarks.move(dragged.id, destination);
 }
