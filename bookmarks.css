@@ -189,6 +189,7 @@ body {
 }
 
 .item {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -219,7 +220,54 @@ body {
   word-break: break-word;
   font-size: 13px;
   line-height: 1.35;
+  min-height: calc(1.35em * 2);
 }
+.item-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.item:hover .item-actions,
+.item:focus-within .item-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.item-action {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.item-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.item-delete {
+  font-size: 16px;
+}
+.item-delete:hover {
+  background: #fce8e6;
+  border-color: #f6aea9;
+  color: #d93025;
+}
+.item-edit:hover {
+  background: var(--accent-soft);
+  border-color: #a8c7fa;
+  color: var(--accent);
+}
+
 .meta {
   display: flex;
   flex-direction: column;
@@ -252,4 +300,168 @@ body {
   color: var(--muted);
   padding: 48px 12px;
   text-align: center;
+}
+
+.ctx-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 148px;
+  padding: 4px 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(32, 33, 36, 0.16);
+}
+.ctx-menu-item {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.ctx-menu-item:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.ctx-menu-item.is-danger {
+  color: #d93025;
+}
+.ctx-menu-item.is-danger:hover {
+  background: #fce8e6;
+  color: #d93025;
+}
+
+.toast {
+  position: fixed;
+  z-index: 1100;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(480px, calc(100vw - 32px));
+  padding: 12px 14px;
+  background: #202124;
+  color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(32, 33, 36, 0.28);
+  font-size: 13px;
+}
+.toast[hidden] {
+  display: none;
+}
+.toast-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toast-undo {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: #8ab4f8;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.toast-undo:hover {
+  color: #aecbfa;
+}
+.toast-undo:focus-visible {
+  outline: 2px solid #8ab4f8;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.edit-popover {
+  position: fixed;
+  z-index: 1000;
+  width: min(360px, calc(100vw - 16px));
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(32, 33, 36, 0.18);
+}
+.edit-popover[hidden] {
+  display: none;
+}
+.edit-popover-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.edit-field input,
+.edit-field textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: #fff;
+  resize: vertical;
+  line-height: 1.4;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.edit-field textarea {
+  min-height: 2.8em;
+  field-sizing: content;
+}
+.edit-field input:focus,
+.edit-field textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.edit-error {
+  margin: 0;
+  font-size: 12px;
+  color: #d93025;
+}
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.edit-btn {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.edit-btn-cancel:hover {
+  background: #f1f3f4;
+}
+.edit-btn-save {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.edit-btn-save:hover {
+  background: #1765cc;
 }
