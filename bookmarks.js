@@ -6,7 +6,10 @@ import {
   createArgsFromSnapshot,
 } from './lib/bookmark-delete.js';
 import { normalizeBookmarkUpdate } from './lib/bookmark-edit.js';
-import { resolveDropDestination } from './lib/bookmark-move.js';
+import {
+  isNoOpVisualReorder,
+  resolveDropDestination,
+} from './lib/bookmark-move.js';
 
 const tabsEl = document.getElementById('tabs');
 const mainEl = document.getElementById('main');
@@ -839,6 +842,15 @@ function cleanupDragSession() {
  * @param {{ id: string, parentId: string, index: number }[]} visualItems
  */
 async function commitBookmarkMove(dragged, targetFolderId, beforeItem, visualItems) {
+  if (
+    isNoOpVisualReorder({
+      draggedId: dragged.id,
+      beforeItemId: beforeItem ? beforeItem.id : null,
+      visualItems,
+    })
+  ) {
+    return;
+  }
   const children = await chrome.bookmarks.getChildren(targetFolderId);
   const destination = resolveDropDestination({
     dragged,

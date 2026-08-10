@@ -2,8 +2,75 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   adjustIndexForSameParentMove,
+  isNoOpVisualReorder,
   resolveDropDestination,
 } from '../lib/bookmark-move.js';
+
+describe('isNoOpVisualReorder', () => {
+  const visualItems = [
+    { id: 'a', parentId: 'g1', index: 0 },
+    { id: 'b', parentId: 'g1', index: 1 },
+    { id: 'c', parentId: 'g1', index: 2 },
+  ];
+
+  it('is true when dragging B before C (original next sibling / same visual slot)', () => {
+    assert.equal(
+      isNoOpVisualReorder({
+        draggedId: 'b',
+        beforeItemId: 'c',
+        visualItems,
+      }),
+      true
+    );
+  });
+
+  it('is false when dragging B before A (move up)', () => {
+    assert.equal(
+      isNoOpVisualReorder({
+        draggedId: 'b',
+        beforeItemId: 'a',
+        visualItems,
+      }),
+      false
+    );
+  });
+
+  it('is false when dragging B to append', () => {
+    assert.equal(
+      isNoOpVisualReorder({
+        draggedId: 'b',
+        beforeItemId: null,
+        visualItems,
+      }),
+      false
+    );
+  });
+
+  it('is true when dragging C to append (already last)', () => {
+    assert.equal(
+      isNoOpVisualReorder({
+        draggedId: 'c',
+        beforeItemId: null,
+        visualItems,
+      }),
+      true
+    );
+  });
+
+  it('is false when dragged is missing from visualItems (cross-group)', () => {
+    assert.equal(
+      isNoOpVisualReorder({
+        draggedId: 'b',
+        beforeItemId: 'x',
+        visualItems: [
+          { id: 'x', parentId: 'g2', index: 0 },
+          { id: 'y', parentId: 'g2', index: 1 },
+        ],
+      }),
+      false
+    );
+  });
+});
 
 describe('adjustIndexForSameParentMove', () => {
   it('keeps index when moving upward (newIndex < oldIndex)', () => {
