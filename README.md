@@ -138,7 +138,7 @@ bookmarks.html|css|js  # 全页 UI
 lib/                   # 纯逻辑（可单测）
 icons/                 # 16 / 48 / 128
 scripts/pack-store.sh  # 打包
-docs/privacy.html      # 隐私政策草稿（商店用）
+docs/privacy.html      # 隐私政策（已部署 Pages）
 tests/                 # 单测
 ```
 
@@ -146,13 +146,13 @@ tests/                 # 单测
 
 ---
 
-## 商店发布备忘
+## 隐私政策
 
-1. `npm run pack` 得到 `dist/bookmark-wall-*.zip`
-2. [Developer Dashboard](https://chrome.google.com/webstore/devconsole) 上传
-3. 隐私政策：将 `docs/privacy.html` 挂到公网 HTTPS，URL 填入 Privacy 表单  
-   （本仓库若为 Private，免费 GitHub Pages 不可用，需自备托管）
-4. 准备截图（1280×800 或 640×400）与小宣传图（440×280）
+公网地址（填商店 Privacy 表单用）：
+
+**https://hss01248.github.io/my-chrome-bookmark/privacy.html**
+
+源文件：`docs/privacy.html`。修改后 push 到 `main` 会触发 GitHub Actions 自动更新 Pages。
 
 ---
 
