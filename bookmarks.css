@@ -506,3 +506,37 @@ body.is-bookmark-dragging {
 body.is-bookmark-dragging a.item {
   cursor: grabbing;
 }
+
+.tab.is-folder-dragging,
+.group-title.is-folder-dragging {
+  opacity: 0.35;
+}
+
+.folder-drag-ghost {
+  position: fixed;
+  z-index: 2000;
+  pointer-events: none;
+  opacity: 0.95;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+  transform: translate(-8px, -8px);
+}
+
+.tab-drop-indicator {
+  width: 3px;
+  align-self: stretch;
+  border-radius: 2px;
+  background: var(--accent);
+  flex: 0 0 3px;
+}
+
+.group-drop-indicator {
+  height: 3px;
+  margin: 4px 0 12px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+body.is-folder-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
