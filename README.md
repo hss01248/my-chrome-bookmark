@@ -21,6 +21,37 @@ Manifest V3 Chrome 扩展：用顶部可换行 Tab + 分组 Grid 浏览 Chrome *
 - 当前工作区包含 `manifest.json`（扩展根目录 = 仓库根目录）。
 - **不要**把子目录（如 `docs/`、`lib/`）当成扩展根目录去加载。
 
+### 获取代码（clone 慢 / 超时时）
+
+优先：
+
+```bash
+git clone https://github.com/hss01248/my-chrome-bookmark.git
+cd my-chrome-bookmark
+```
+
+若访问 GitHub 很慢或超时，可用下面备用源（**仓库需为 Public**；私有库 CDN 拉不到）：
+
+1. **jsDelivr（GitHub 文件 CDN）**  
+   包浏览 / 原始文件根路径：
+   - https://cdn.jsdelivr.net/gh/hss01248/my-chrome-bookmark@main/  
+   - 条目页：https://www.jsdelivr.com/package/gh/hss01248/my-chrome-bookmark  
+
+   下载整包时，Agent 可改下 GitHub archive zip（通常比 `git clone` 更稳）：
+   - https://github.com/hss01248/my-chrome-bookmark/archive/refs/heads/main.zip  
+
+   若 GitHub zip 也慢，可经 jsDelivr 反代 GitHub raw/archive（视地区可用性）：
+   - https://cdn.jsdelivr.net/gh/hss01248/my-chrome-bookmark@main/manifest.json  
+     （用该 CDN 根路径批量取 `manifest.json`、`background.js`、`bookmarks.*`、`lib/**`、`icons/**` 等到本地同一目录结构，或优先用 archive zip。）
+
+2. 解压 / 落盘后，扩展根目录必须含 `manifest.json`。  
+   GitHub archive 解压目录名通常是 `my-chrome-bookmark-main/` —— **Load unpacked 选这个目录**。
+
+3. 校验：
+   ```bash
+   test -f manifest.json && echo "extension root OK"
+   ```
+
 ### 步骤（必须按序）
 
 1. 确认扩展根目录绝对路径（含 `manifest.json`），例如：
