@@ -116,6 +116,9 @@ function itemLink(item, { showMeta = false } = {}) {
   a.rel = 'noopener noreferrer';
   a.title = `${item.title}\n${item.url}`;
   a.dataset.bookmarkId = item.id;
+  a.dataset.parentId = item.parentId ?? '';
+  a.dataset.index = String(item.index ?? 0);
+  a.dataset.draggableItem = showMeta ? '0' : '1'; // search results: no drag
 
   const img = document.createElement('img');
   img.src = favicon(item.url);
@@ -504,6 +507,7 @@ async function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
     const section = document.createElement('section');
     section.className = 'group';
     section.id = id;
+    section.dataset.folderId = group.folderId;
 
     const onlyUnnamed =
       hideSingleUnnamedTitle &&
@@ -519,6 +523,7 @@ async function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
 
     const grid = document.createElement('div');
     grid.className = 'grid';
+    grid.dataset.folderId = group.folderId;
     section.appendChild(grid);
     shellFrag.appendChild(section);
 
