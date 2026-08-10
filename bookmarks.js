@@ -28,6 +28,8 @@ const ITEM_CHUNK = 48;
 const UNDO_TOAST_MS = 5000;
 const LONG_PRESS_MS = 400;
 const LONG_PRESS_MOVE_TOLERANCE_PX = 8;
+/** Press-and-move starts drag once past this distance (before long-press fires). */
+const DRAG_START_SLOP_PX = 12;
 const STATUS_TOAST_MS = 2000;
 const SUPPRESS_CLICK_MS = 500;
 
@@ -160,11 +162,15 @@ function itemLink(item, { showMeta = false } = {}) {
   a.href = item.url;
   a.target = '_blank';
   a.rel = 'noopener noreferrer';
+  a.draggable = false;
   a.title = `${item.title}\n${item.url}`;
   a.dataset.bookmarkId = item.id;
   a.dataset.parentId = item.parentId ?? '';
   a.dataset.index = String(item.index ?? 0);
   a.dataset.draggableItem = showMeta ? '0' : '1'; // search results: no drag
+  a.addEventListener('dragstart', (event) => {
+    event.preventDefault();
+  });
 
   const img = document.createElement('img');
   img.src = favicon(item.url);
@@ -913,9 +919,17 @@ function onDragPointerMove(event) {
   if (!dragSession.active) {
     const dx = event.clientX - dragSession.startX;
     const dy = event.clientY - dragSession.startY;
-    if (Math.hypot(dx, dy) > LONG_PRESS_MOVE_TOLERANCE_PX) {
-      dragSession.sourceEl.classList.remove('is-drag-pending');
-      cleanupDragSession();
+    // Press-and-move before long-press finishes: start drag instead of cancel.
+    if (Math.hypot(dx, dy) > DRAG_START_SLOP_PX) {
+      if (dragSession.timer) {
+        clearTimeout(dragSession.timer);
+        dragSession.timer = null;
+      }
+      activateDragSession();
+      if (!dragSession?.active) return;
+      dragSession.movedSinceActive = true;
+      positionGhost(event.clientX, event.clientY);
+      updateDropTarget(event.clientX, event.clientY);
     }
     return;
   }
@@ -944,6 +958,10 @@ async function onDragPointerUp(event) {
   }
 
   suppressClickUntil = Date.now() + SUPPRESS_CLICK_MS;
+  // Final hit-test at release point (last move may be stale).
+  if (dragSession.movedSinceActive) {
+    updateDropTarget(event.clientX, event.clientY);
+  }
   const { dragged, targetFolderId, beforeItem, visualItems, movedSinceActive } =
     dragSession;
   cleanupDragSession();
