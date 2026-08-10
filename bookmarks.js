@@ -24,6 +24,13 @@ const extensionOrigin = chrome.runtime.getURL('/').replace(/\/$/, '');
 
 /** Increments to cancel in-flight progressive renders. */
 let renderGeneration = 0;
+/** Generation whose group grids have finished filling (0 = none). */
+let groupsFillGeneration = 0;
+/**
+ * Section to scroll to after progressive fill completes.
+ * @type {HTMLElement | null}
+ */
+let pendingNavSection = null;
 const ITEM_CHUNK = 48;
 const UNDO_TOAST_MS = 5000;
 const LONG_PRESS_MS = 400;
@@ -99,10 +106,25 @@ function hideGroupNav() {
 }
 
 function scrollMainToSection(section) {
-  const mainRect = mainEl.getBoundingClientRect();
-  const secRect = section.getBoundingClientRect();
-  const top = mainEl.scrollTop + (secRect.top - mainRect.top) - 8;
+  if (!(section instanceof HTMLElement) || !mainEl.contains(section)) return;
+  // Wait until chunked fill finishes — empty grids make later sections look
+  // cramped and the computed scroll top lands on the wrong group.
+  if (groupsFillGeneration !== renderGeneration) {
+    pendingNavSection = section;
+    return;
+  }
+  const top =
+    mainEl.scrollTop +
+    section.getBoundingClientRect().top -
+    mainEl.getBoundingClientRect().top -
+    8;
   mainEl.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+}
+
+function flushPendingNavScroll() {
+  const section = pendingNavSection;
+  pendingNavSection = null;
+  if (section) scrollMainToSection(section);
 }
 
 function renderGroupNav(sections) {
@@ -598,11 +620,14 @@ async function fillGridChunked(grid, items, generation, { showMeta = false } = {
 
 async function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
   const generation = ++renderGeneration;
+  groupsFillGeneration = 0;
+  pendingNavSection = null;
   mainEl.innerHTML = '';
 
   if (!groups.length) {
     hideGroupNav();
     mainEl.innerHTML = `<p class="empty">这里还没有书签</p>`;
+    groupsFillGeneration = generation;
     applyScrollAfterRender();
     return;
   }
@@ -654,7 +679,9 @@ async function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
     if (!ok) return;
   }
   if (generation !== renderGeneration) return;
+  groupsFillGeneration = generation;
   applyScrollAfterRender();
+  flushPendingNavScroll();
 }
 
 async function renderSearchResults(query) {

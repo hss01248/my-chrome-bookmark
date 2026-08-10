@@ -167,8 +167,6 @@ body {
 .group {
   margin-bottom: 24px;
   scroll-margin-top: 12px;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 240px;
 }
 .group-title {
   margin: 0 0 10px;
