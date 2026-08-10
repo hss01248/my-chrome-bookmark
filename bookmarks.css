@@ -465,3 +465,46 @@ body {
 .edit-btn-save:hover {
   background: #1765cc;
 }
+
+.item.is-drag-pending {
+  opacity: 0.85;
+  transform: scale(1.02);
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+
+.item.is-dragging {
+  opacity: 0.35;
+}
+
+.drag-ghost {
+  position: fixed;
+  z-index: 2000;
+  pointer-events: none;
+  width: min(280px, 70vw);
+  opacity: 0.95;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+  transform: translate(-8px, -8px) rotate(1.5deg);
+}
+
+.group.is-drop-target {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: var(--radius);
+}
+
+.drop-indicator {
+  height: 3px;
+  margin: 4px 0;
+  border-radius: 2px;
+  background: var(--accent);
+  grid-column: 1 / -1;
+}
+
+body.is-bookmark-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+body.is-bookmark-dragging a.item {
+  cursor: grabbing;
+}
