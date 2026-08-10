@@ -52,12 +52,15 @@ let dropIndicatorEl = null;
  *   startX: number,
  *   startY: number,
  *   active: boolean,
+ *   movedSinceActive: boolean,
  *   targetFolderId: string | null,
  *   beforeItem: { id: string, parentId: string, index: number } | null,
  *   visualItems: { id: string, parentId: string, index: number }[],
  * }}
  */
 let dragSession = null;
+/** Blocks new long-press while a move API call is in flight. */
+let moveInFlight = false;
 
 /**
  * @param {Element | null} el
@@ -625,6 +628,7 @@ function setSearching(isSearching) {
 }
 
 function render() {
+  cleanupDragSession();
   const q = searchEl.value.trim();
   if (q) {
     setSearching(true);
@@ -780,6 +784,7 @@ function updateDropTarget(clientX, clientY) {
 function activateDragSession() {
   if (!dragSession || dragSession.active) return;
   dragSession.active = true;
+  dragSession.movedSinceActive = false;
   dragSession.timer = null;
   suppressClickUntil = Date.now() + SUPPRESS_CLICK_MS;
 
@@ -804,8 +809,6 @@ function activateDragSession() {
   } catch {
     /* ignore */
   }
-
-  updateDropTarget(startX, startY);
 }
 
 function cleanupDragSession() {
@@ -858,7 +861,7 @@ async function commitBookmarkMove(dragged, targetFolderId, beforeItem, visualIte
  */
 function onDragPointerDown(event) {
   if (event.button !== 0) return;
-  if (dragSession) return;
+  if (moveInFlight || dragSession) return;
   const target = event.target;
   if (!(target instanceof Element)) return;
   if (target.closest('.item-action')) return;
@@ -878,6 +881,7 @@ function onDragPointerDown(event) {
     startX: event.clientX,
     startY: event.clientY,
     active: false,
+    movedSinceActive: false,
     targetFolderId: null,
     beforeItem: null,
     visualItems: [],
@@ -905,6 +909,14 @@ function onDragPointerMove(event) {
   }
 
   positionGhost(event.clientX, event.clientY);
+
+  if (!dragSession.movedSinceActive) {
+    const dx = event.clientX - dragSession.startX;
+    const dy = event.clientY - dragSession.startY;
+    if (Math.hypot(dx, dy) <= LONG_PRESS_MOVE_TOLERANCE_PX) return;
+    dragSession.movedSinceActive = true;
+  }
+
   updateDropTarget(event.clientX, event.clientY);
 }
 
@@ -920,16 +932,20 @@ async function onDragPointerUp(event) {
   }
 
   suppressClickUntil = Date.now() + SUPPRESS_CLICK_MS;
-  const { dragged, targetFolderId, beforeItem, visualItems } = dragSession;
+  const { dragged, targetFolderId, beforeItem, visualItems, movedSinceActive } =
+    dragSession;
   cleanupDragSession();
 
-  if (!targetFolderId) return;
+  if (!movedSinceActive || !targetFolderId) return;
 
+  moveInFlight = true;
   try {
     await commitBookmarkMove(dragged, targetFolderId, beforeItem, visualItems);
   } catch (err) {
     console.error('Failed to move bookmark', err);
     showStatusToast('移动失败');
+  } finally {
+    moveInFlight = false;
   }
 }
 
