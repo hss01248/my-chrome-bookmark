@@ -80,4 +80,85 @@ describe('buildBookmarkWall', () => {
     const item = buildBookmarkWall(tree).tabs[0].groups[0].items[0];
     assert.equal(item.title, 'https://empty-title.example/');
   });
+
+  it('exposes parentId/index on items and folderId on groups', () => {
+    const tree = bar([
+      {
+        id: '12',
+        title: '2026',
+        children: [
+          {
+            id: '20',
+            title: 'AI工具',
+            children: [
+              {
+                id: '30',
+                title: 'Claude',
+                url: 'https://claude.example/',
+                parentId: '20',
+                index: 0,
+              },
+              {
+                id: '31',
+                title: 'nested',
+                children: [
+                  {
+                    id: '40',
+                    title: 'Deep',
+                    url: 'https://deep.example/',
+                    parentId: '31',
+                    index: 0,
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            id: '21',
+            title: 'Loose',
+            url: 'https://loose.example/',
+            parentId: '12',
+            index: 1,
+          },
+        ],
+      },
+    ]);
+
+    const wall = buildBookmarkWall(tree);
+    const t2026 = wall.tabs[0];
+    assert.equal(t2026.groups[0].folderId, '20');
+    assert.equal(t2026.groups[1].folderId, '12');
+
+    const claude = t2026.groups[0].items.find((i) => i.id === '30');
+    assert.deepEqual(
+      { parentId: claude.parentId, index: claude.index },
+      { parentId: '20', index: 0 }
+    );
+
+    const deep = t2026.groups[0].items.find((i) => i.id === '40');
+    assert.deepEqual(
+      { parentId: deep.parentId, index: deep.index },
+      { parentId: '31', index: 0 }
+    );
+
+    const loose = t2026.groups[1].items[0];
+    assert.deepEqual(
+      { parentId: loose.parentId, index: loose.index },
+      { parentId: '12', index: 1 }
+    );
+
+    const barLooseTree = bar([
+      {
+        id: '11',
+        title: 'Direct',
+        url: 'https://a.example/',
+        parentId: '1',
+        index: 0,
+      },
+    ]);
+    const unnamed = buildBookmarkWall(barLooseTree).tabs[0];
+    assert.equal(unnamed.id, '__unnamed__');
+    assert.equal(unnamed.groups[0].folderId, '1');
+    assert.equal(unnamed.groups[0].items[0].parentId, '1');
+  });
 });
