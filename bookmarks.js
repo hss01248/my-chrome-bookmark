@@ -204,6 +204,10 @@ function renderTabs() {
     btn.type = 'button';
     btn.className = 'tab';
     btn.textContent = tab.name;
+    if (tab.id !== '__unnamed__') {
+      btn.dataset.folderId = tab.id;
+      btn.dataset.folderDrag = 'tab';
+    }
     btn.setAttribute('aria-selected', String(tab.id === selectedTabId));
     btn.addEventListener('click', () => {
       if (tab.id === selectedTabId && !searchEl.value.trim()) return;
@@ -655,6 +659,10 @@ async function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
       const h = document.createElement('h2');
       h.className =
         'group-title' + (group.name === UNNAMED ? ' is-unnamed' : '');
+      if (group.name !== UNNAMED && group.folderId) {
+        h.dataset.folderId = group.folderId;
+        h.dataset.folderDrag = 'group';
+      }
       h.textContent = group.name;
       section.appendChild(h);
     }
