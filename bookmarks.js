@@ -1,4 +1,4 @@
-import { buildBookmarkWall, UNNAMED } from './lib/bookmark-model.js';
+import { buildBookmarkWall, UNNAMED, findBookmarkBar } from './lib/bookmark-model.js';
 import { searchBookmarkWall } from './lib/search.js';
 import { faviconUrlFor, PLACEHOLDER_FAVICON } from './lib/favicon.js';
 import {
@@ -9,6 +9,8 @@ import { normalizeBookmarkUpdate } from './lib/bookmark-edit.js';
 import {
   isNoOpVisualReorder,
   resolveDropDestination,
+  isNoOpFolderReorder,
+  resolveFolderReorderDestination,
 } from './lib/bookmark-move.js';
 
 const tabsEl = document.getElementById('tabs');
@@ -37,6 +39,8 @@ const LONG_PRESS_MS = 400;
 const LONG_PRESS_MOVE_TOLERANCE_PX = 8;
 /** Press-and-move starts drag once past this distance (before long-press fires). */
 const DRAG_START_SLOP_PX = 12;
+/** Press-and-move starts folder (tab/group) drag once past this distance. */
+const FOLDER_DRAG_SLOP_PX = 6;
 const STATUS_TOAST_MS = 2000;
 const SUPPRESS_CLICK_MS = 500;
 
@@ -71,6 +75,28 @@ let dropIndicatorEl = null;
  * }}
  */
 let dragSession = null;
+/**
+ * @type {null | {
+ *   kind: 'tab' | 'group',
+ *   pointerId: number,
+ *   sourceEl: HTMLElement,
+ *   folderId: string,
+ *   parentId: string,
+ *   ghost: HTMLElement | null,
+ *   startX: number,
+ *   startY: number,
+ *   active: boolean,
+ *   beforeId: string | null,
+ *   folderIds: string[],
+ * }}
+ */
+let folderDragSession = null;
+/** Swallow the click that follows an active tab folder drag. */
+let suppressTabClick = false;
+/** Cached bookmark bar folder id (Chrome usually `'1'`). */
+let bookmarkBarId = '1';
+/** @type {HTMLElement | null} */
+let folderDropIndicatorEl = null;
 /** Blocks new long-press while a move API call is in flight. */
 let moveInFlight = false;
 /**
@@ -210,6 +236,10 @@ function renderTabs() {
     }
     btn.setAttribute('aria-selected', String(tab.id === selectedTabId));
     btn.addEventListener('click', () => {
+      if (suppressTabClick) {
+        suppressTabClick = false;
+        return;
+      }
       if (tab.id === selectedTabId && !searchEl.value.trim()) return;
       selectedTabId = tab.id;
       searchEl.value = '';
@@ -718,6 +748,7 @@ function setSearching(isSearching) {
 
 function render() {
   cleanupDragSession();
+  cleanupFolderDragSession({ resetTabClickSuppress: true });
   rememberScrollPreserve();
   const q = searchEl.value.trim();
   if (q) {
@@ -747,6 +778,7 @@ async function reload() {
   const tree = await chrome.bookmarks.getTree();
   const prev = selectedTabId;
   wall = buildBookmarkWall(tree[0]);
+  bookmarkBarId = findBookmarkBar(tree[0])?.id ?? '1';
   if (prev && wall.tabs.some((t) => t.id === prev)) {
     selectedTabId = prev;
   } else {
@@ -964,7 +996,7 @@ async function commitBookmarkMove(dragged, targetFolderId, beforeItem, visualIte
  */
 function onDragPointerDown(event) {
   if (event.button !== 0) return;
-  if (moveInFlight || dragSession) return;
+  if (moveInFlight || dragSession || folderDragSession) return;
   const target = event.target;
   if (!(target instanceof Element)) return;
   if (target.closest('.item-action')) return;
@@ -1087,6 +1119,330 @@ mainEl.addEventListener('pointerup', onDragPointerUp);
 mainEl.addEventListener('pointercancel', onDragPointerCancel);
 mainEl.addEventListener('lostpointercapture', onDragLostPointerCapture);
 
+// --- Folder (tab / group) press-drag ---
+
+/**
+ * When appending among real folders, insert before the first trailing
+ * non-folder child (keeps loose links / 未命名 semantics at the end).
+ * @param {string[]} childIds
+ * @param {string[]} folderIds
+ * @returns {string | null}
+ */
+function beforeIdForFolderEnd(childIds, folderIds) {
+  const positions = folderIds
+    .map((id) => childIds.indexOf(id))
+    .filter((i) => i >= 0);
+  const lastFolderPos = positions.length ? Math.max(...positions) : -1;
+  for (let i = lastFolderPos + 1; i < childIds.length; i++) {
+    if (!folderIds.includes(childIds[i])) return childIds[i];
+  }
+  return null;
+}
+
+function clearFolderDropIndicator() {
+  folderDropIndicatorEl?.remove();
+  folderDropIndicatorEl = null;
+}
+
+/**
+ * @param {'tab' | 'group'} kind
+ */
+function ensureFolderDropIndicator(kind) {
+  const className =
+    kind === 'tab' ? 'tab-drop-indicator' : 'group-drop-indicator';
+  if (
+    folderDropIndicatorEl &&
+    folderDropIndicatorEl.className === className
+  ) {
+    return folderDropIndicatorEl;
+  }
+  folderDropIndicatorEl?.remove();
+  folderDropIndicatorEl = document.createElement('div');
+  folderDropIndicatorEl.className = className;
+  return folderDropIndicatorEl;
+}
+
+function positionFolderGhost(x, y) {
+  const ghost = folderDragSession?.ghost;
+  if (!ghost) return;
+  ghost.style.left = `${x}px`;
+  ghost.style.top = `${y}px`;
+}
+
+/**
+ * @param {{ resetTabClickSuppress?: boolean }} [opts]
+ */
+function cleanupFolderDragSession(opts = {}) {
+  const { resetTabClickSuppress = false } = opts;
+  if (!folderDragSession) {
+    if (resetTabClickSuppress) suppressTabClick = false;
+    return;
+  }
+  const session = folderDragSession;
+  folderDragSession = null;
+  session.sourceEl.classList.remove('is-folder-dragging');
+  session.ghost?.remove();
+  document.body.classList.remove('is-folder-dragging');
+  clearFolderDropIndicator();
+  try {
+    if (session.sourceEl.hasPointerCapture(session.pointerId)) {
+      session.sourceEl.releasePointerCapture(session.pointerId);
+    }
+  } catch {
+    /* ignore */
+  }
+  if (resetTabClickSuppress) suppressTabClick = false;
+}
+
+function activateFolderDragSession() {
+  if (!folderDragSession || folderDragSession.active) return;
+  folderDragSession.active = true;
+
+  const { sourceEl, pointerId, startX, startY, kind } = folderDragSession;
+  if (kind === 'tab') suppressTabClick = true;
+
+  sourceEl.classList.add('is-folder-dragging');
+  hideContextMenu();
+  hideEditPopover();
+
+  const ghost = /** @type {HTMLElement} */ (sourceEl.cloneNode(true));
+  ghost.classList.add('folder-drag-ghost');
+  ghost.classList.remove('is-folder-dragging');
+  ghost.setAttribute('aria-hidden', 'true');
+  if (ghost instanceof HTMLButtonElement) ghost.type = 'button';
+  document.body.appendChild(ghost);
+  folderDragSession.ghost = ghost;
+  document.body.classList.add('is-folder-dragging');
+  positionFolderGhost(startX, startY);
+
+  try {
+    sourceEl.setPointerCapture(pointerId);
+  } catch {
+    /* ignore */
+  }
+}
+
+function updateFolderDropTarget(clientX, clientY) {
+  if (!folderDragSession?.active) return;
+
+  const { kind, folderId } = folderDragSession;
+  clearFolderDropIndicator();
+  folderDragSession.beforeId = null;
+
+  if (kind === 'tab') {
+    const tabEls = [
+      ...tabsEl.querySelectorAll('.tab[data-folder-drag="tab"]'),
+    ].filter((el) => el instanceof HTMLElement);
+    folderDragSession.folderIds = tabEls
+      .map((el) => el.dataset.folderId)
+      .filter(Boolean);
+    const candidates = tabEls.filter((el) => el.dataset.folderId !== folderId);
+    let beforeEl = null;
+    for (const el of candidates) {
+      const box = el.getBoundingClientRect();
+      if (clientX < box.left + box.width / 2) {
+        beforeEl = el;
+        break;
+      }
+    }
+    const indicator = ensureFolderDropIndicator('tab');
+    if (beforeEl) {
+      tabsEl.insertBefore(indicator, beforeEl);
+      folderDragSession.beforeId = beforeEl.dataset.folderId ?? null;
+    } else {
+      const unnamed = [...tabsEl.children].find(
+        (el) =>
+          el instanceof HTMLElement &&
+          el.classList.contains('tab') &&
+          !el.dataset.folderDrag
+      );
+      if (unnamed) {
+        tabsEl.insertBefore(indicator, unnamed);
+      } else {
+        tabsEl.appendChild(indicator);
+      }
+      folderDragSession.beforeId = null;
+    }
+    return;
+  }
+
+  const titleEls = [
+    ...mainEl.querySelectorAll('.group-title[data-folder-drag="group"]'),
+  ].filter((el) => el instanceof HTMLElement);
+  const sections = titleEls
+    .map((title) => title.closest('.group'))
+    .filter((el) => el instanceof HTMLElement);
+  folderDragSession.folderIds = titleEls
+    .map((el) => el.dataset.folderId)
+    .filter(Boolean);
+  const candidates = sections.filter((el) => el.dataset.folderId !== folderId);
+  let beforeSection = null;
+  for (const el of candidates) {
+    const box = el.getBoundingClientRect();
+    if (clientY < box.top + box.height / 2) {
+      beforeSection = el;
+      break;
+    }
+  }
+  const indicator = ensureFolderDropIndicator('group');
+  if (beforeSection) {
+    mainEl.insertBefore(indicator, beforeSection);
+    folderDragSession.beforeId = beforeSection.dataset.folderId ?? null;
+  } else {
+    const unnamedSection = [...mainEl.querySelectorAll('.group')].find(
+      (el) =>
+        el instanceof HTMLElement &&
+        !el.querySelector('.group-title[data-folder-drag="group"]')
+    );
+    if (unnamedSection) {
+      mainEl.insertBefore(indicator, unnamedSection);
+    } else {
+      mainEl.appendChild(indicator);
+    }
+    folderDragSession.beforeId = null;
+  }
+}
+
+/**
+ * @param {string} folderId
+ * @param {string} parentId
+ * @param {string | null} beforeId
+ * @param {string[]} folderIds
+ */
+async function commitFolderMove(folderId, parentId, beforeId, folderIds) {
+  if (isNoOpFolderReorder({ draggedId: folderId, beforeId, folderIds })) {
+    return;
+  }
+  const children = await chrome.bookmarks.getChildren(parentId);
+  const childIds = children.map((c) => c.id);
+  let moveBeforeId = beforeId;
+  if (moveBeforeId == null) {
+    moveBeforeId = beforeIdForFolderEnd(childIds, folderIds);
+  }
+  const destination = resolveFolderReorderDestination({
+    parentId,
+    draggedId: folderId,
+    beforeId: moveBeforeId,
+    childIds,
+  });
+  await chrome.bookmarks.move(folderId, destination);
+}
+
+/**
+ * @param {PointerEvent} event
+ */
+function onFolderDragPointerDown(event) {
+  if (event.button !== 0) return;
+  if (moveInFlight || dragSession || folderDragSession) return;
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+
+  const handle = target.closest('[data-folder-drag]');
+  if (!(handle instanceof HTMLElement)) return;
+  if (!tabsEl.contains(handle) && !mainEl.contains(handle)) return;
+
+  const kind = handle.dataset.folderDrag;
+  const folderId = handle.dataset.folderId;
+  if ((kind !== 'tab' && kind !== 'group') || !folderId) return;
+
+  let parentId;
+  if (kind === 'tab') {
+    parentId = bookmarkBarId;
+  } else {
+    if (!selectedTabId || selectedTabId === '__unnamed__') return;
+    parentId = selectedTabId;
+  }
+
+  folderDragSession = {
+    kind,
+    pointerId: event.pointerId,
+    sourceEl: handle,
+    folderId,
+    parentId,
+    ghost: null,
+    startX: event.clientX,
+    startY: event.clientY,
+    active: false,
+    beforeId: null,
+    folderIds: [],
+  };
+}
+
+/**
+ * @param {PointerEvent} event
+ */
+function onFolderDragPointerMove(event) {
+  if (!folderDragSession || event.pointerId !== folderDragSession.pointerId) {
+    return;
+  }
+
+  if (!folderDragSession.active) {
+    const dx = event.clientX - folderDragSession.startX;
+    const dy = event.clientY - folderDragSession.startY;
+    if (Math.hypot(dx, dy) <= FOLDER_DRAG_SLOP_PX) return;
+    activateFolderDragSession();
+    if (!folderDragSession?.active) return;
+  }
+
+  positionFolderGhost(event.clientX, event.clientY);
+  updateFolderDropTarget(event.clientX, event.clientY);
+}
+
+/**
+ * @param {PointerEvent} event
+ */
+async function onFolderDragPointerUp(event) {
+  if (!folderDragSession || event.pointerId !== folderDragSession.pointerId) {
+    return;
+  }
+
+  if (!folderDragSession.active) {
+    cleanupFolderDragSession({ resetTabClickSuppress: true });
+    return;
+  }
+
+  updateFolderDropTarget(event.clientX, event.clientY);
+  const { folderId, parentId, beforeId, folderIds } = folderDragSession;
+  cleanupFolderDragSession();
+
+  moveInFlight = true;
+  try {
+    await commitFolderMove(folderId, parentId, beforeId, folderIds);
+  } catch (err) {
+    console.error('Failed to move folder', err);
+    showStatusToast('移动失败');
+  } finally {
+    moveInFlight = false;
+  }
+}
+
+/**
+ * @param {PointerEvent} event
+ */
+function onFolderDragPointerCancel(event) {
+  if (!folderDragSession || event.pointerId !== folderDragSession.pointerId) {
+    return;
+  }
+  cleanupFolderDragSession({ resetTabClickSuppress: true });
+}
+
+/**
+ * @param {PointerEvent} event
+ */
+function onFolderDragLostPointerCapture(event) {
+  if (!folderDragSession || event.pointerId !== folderDragSession.pointerId) {
+    return;
+  }
+  if (!folderDragSession.active) return;
+  cleanupFolderDragSession({ resetTabClickSuppress: true });
+}
+
+document.addEventListener('pointerdown', onFolderDragPointerDown);
+document.addEventListener('pointermove', onFolderDragPointerMove);
+document.addEventListener('pointerup', onFolderDragPointerUp);
+document.addEventListener('pointercancel', onFolderDragPointerCancel);
+document.addEventListener('lostpointercapture', onFolderDragLostPointerCapture);
+
 mainEl.addEventListener(
   'click',
   (event) => {
@@ -1124,6 +1480,9 @@ document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
   if (dragSession) {
     cleanupDragSession();
+  }
+  if (folderDragSession) {
+    cleanupFolderDragSession({ resetTabClickSuppress: true });
   }
   hideContextMenu();
   hideEditPopover();
