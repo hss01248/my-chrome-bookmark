@@ -1447,12 +1447,72 @@ function updateFolderDropTarget(clientX, clientY) {
 }
 
 /**
+ * Reorder a Tab button or Group section in the DOM without rebuilding the page.
+ * @param {'tab' | 'group'} kind
+ * @param {string} folderId
+ * @param {string | null} beforeId
+ * @returns {boolean}
+ */
+function applyLocalFolderMoveDom(kind, folderId, beforeId) {
+  if (kind === 'tab') {
+    const el = tabsEl.querySelector(`.tab[data-folder-id="${folderId}"]`);
+    if (!(el instanceof HTMLElement)) return false;
+    const beforeEl = beforeId
+      ? tabsEl.querySelector(`.tab[data-folder-id="${beforeId}"]`)
+      : null;
+    const unnamed = [...tabsEl.children].find(
+      (node) =>
+        node instanceof HTMLElement &&
+        node.classList.contains('tab') &&
+        !node.dataset.folderDrag
+    );
+    if (beforeEl instanceof HTMLElement) {
+      tabsEl.insertBefore(el, beforeEl);
+    } else if (unnamed instanceof HTMLElement) {
+      tabsEl.insertBefore(el, unnamed);
+    } else {
+      tabsEl.appendChild(el);
+    }
+    return true;
+  }
+
+  const title = mainEl.querySelector(
+    `.group-title[data-folder-drag="group"][data-folder-id="${folderId}"]`
+  );
+  const section = title?.closest('section.group');
+  if (!(section instanceof HTMLElement)) return false;
+
+  const beforeTitle = beforeId
+    ? mainEl.querySelector(
+        `.group-title[data-folder-drag="group"][data-folder-id="${beforeId}"]`
+      )
+    : null;
+  const beforeSection = beforeTitle?.closest('section.group');
+  const unnamedSection = [...mainEl.querySelectorAll('section.group')].find(
+    (node) =>
+      node instanceof HTMLElement &&
+      !node.querySelector('.group-title[data-folder-drag="group"]')
+  );
+
+  if (beforeSection instanceof HTMLElement) {
+    mainEl.insertBefore(section, beforeSection);
+  } else if (unnamedSection instanceof HTMLElement) {
+    mainEl.insertBefore(section, unnamedSection);
+  } else {
+    mainEl.appendChild(section);
+  }
+  refreshGroupNavFromDom();
+  return true;
+}
+
+/**
  * @param {string} folderId
  * @param {string} parentId
  * @param {string | null} beforeId
  * @param {string[]} folderIds
+ * @param {'tab' | 'group'} kind
  */
-async function commitFolderMove(folderId, parentId, beforeId, folderIds) {
+async function commitFolderMove(folderId, parentId, beforeId, folderIds, kind) {
   if (isNoOpFolderReorder({ draggedId: folderId, beforeId, folderIds })) {
     return;
   }
@@ -1468,7 +1528,22 @@ async function commitFolderMove(folderId, parentId, beforeId, folderIds) {
     beforeId: moveBeforeId,
     childIds,
   });
-  await chrome.bookmarks.move(folderId, destination);
+  localHandledMoves.add(folderId);
+  try {
+    await chrome.bookmarks.move(folderId, destination);
+    const ok = applyLocalFolderMoveDom(kind, folderId, beforeId);
+    if (!ok) {
+      localHandledMoves.delete(folderId);
+      await reload();
+      return;
+    }
+    void softSyncWallFromTree().catch((err) => {
+      console.error('Failed to soft-sync wall after folder move', err);
+    });
+  } catch (err) {
+    localHandledMoves.delete(folderId);
+    throw err;
+  }
 }
 
 /**
@@ -1545,12 +1620,12 @@ async function onFolderDragPointerUp(event) {
   }
 
   updateFolderDropTarget(event.clientX, event.clientY);
-  const { folderId, parentId, beforeId, folderIds } = folderDragSession;
+  const { folderId, parentId, beforeId, folderIds, kind } = folderDragSession;
   cleanupFolderDragSession();
 
   moveInFlight = true;
   try {
-    await commitFolderMove(folderId, parentId, beforeId, folderIds);
+    await commitFolderMove(folderId, parentId, beforeId, folderIds, kind);
   } catch (err) {
     console.error('Failed to move folder', err);
     showStatusToast('移动失败');
