@@ -73,6 +73,39 @@ describe('buildBookmarkWall', () => {
     assert.deepEqual(wall.tabs[0].groups.map((g) => g.name), ['sub']);
   });
 
+  it('keeps empty named subfolder groups', () => {
+    const tree = bar([
+      {
+        id: '10',
+        title: 'only',
+        children: [
+          { id: '20', title: 'empty-group', children: [] },
+          {
+            id: '21',
+            title: 'with-link',
+            children: [{ id: '30', title: 'x', url: 'https://x.example/' }],
+          },
+        ],
+      },
+    ]);
+    const wall = buildBookmarkWall(tree);
+    assert.deepEqual(
+      wall.tabs[0].groups.map((g) => ({ name: g.name, folderId: g.folderId, n: g.items.length })),
+      [
+        { name: 'empty-group', folderId: '20', n: 0 },
+        { name: 'with-link', folderId: '21', n: 1 },
+      ]
+    );
+  });
+
+  it('keeps empty top-level folder tab with empty groups list when no children', () => {
+    const tree = bar([{ id: '10', title: 'github', children: [] }]);
+    const wall = buildBookmarkWall(tree);
+    assert.equal(wall.tabs.length, 1);
+    assert.equal(wall.tabs[0].id, '10');
+    assert.deepEqual(wall.tabs[0].groups, []);
+  });
+
   it('uses url as title when title is empty', () => {
     const tree = bar([
       { id: '11', title: '', url: 'https://empty-title.example/' },

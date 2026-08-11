@@ -81,6 +81,9 @@ body {
   display: none;
 }
 .tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
@@ -88,6 +91,38 @@ body {
   padding: 8px 14px;
   cursor: pointer;
   font-size: 14px;
+}
+.tab-label {
+  max-width: 16em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tab.tab-add {
+  padding: 8px 12px;
+  font-weight: 600;
+  color: var(--accent);
+  border-style: dashed;
+}
+.tab.tab-add:hover {
+  background: var(--accent-soft);
+}
+.tab .folder-action {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.tab:hover .folder-action,
+.tab:focus-within .folder-action {
+  opacity: 1;
+  pointer-events: auto;
 }
 .tab[aria-selected="true"] {
   background: var(--accent-soft);
@@ -179,15 +214,83 @@ body {
   scroll-margin-top: 12px;
 }
 .group-title {
+  position: relative;
   margin: 0 0 10px;
   font-size: 14px;
   font-weight: 700;
   border-left: 3px solid var(--accent);
   padding-left: 8px;
+  padding-right: 4px;
+}
+.group-title-text {
+  display: block;
+  min-width: 0;
 }
 .group-title.is-unnamed {
   border-left-color: #9aa0a6;
   color: var(--muted);
+}
+.group-title .folder-action {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.group-title:hover .folder-action,
+.group-title:focus-within .folder-action {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.folder-action {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.folder-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.folder-edit:hover {
+  background: var(--accent-soft);
+  border-color: #a8c7fa;
+  color: var(--accent);
+}
+
+.group-add-row {
+  margin: 8px 0 16px;
+}
+.group-add {
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+.group-add:hover {
+  background: var(--accent-soft);
+  border-color: #a8c7fa;
+}
+.group-empty {
+  margin: 0;
+  padding: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  grid-column: 1 / -1;
 }
 
 .grid {

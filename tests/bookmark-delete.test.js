@@ -51,7 +51,7 @@ describe('createArgsFromSnapshot', () => {
 });
 
 describe('removeItemFromWall', () => {
-  it('removes an item and drops empty groups', () => {
+  it('removes an item and keeps empty real folder groups', () => {
     const wall = {
       tabs: [
         {
@@ -85,8 +85,31 @@ describe('removeItemFromWall', () => {
     );
 
     assert.equal(removeItemFromWall(wall, 'c'), true);
-    assert.equal(wall.tabs[0].groups.length, 1);
-    assert.equal(wall.tabs[0].groups[0].name, 'AI');
+    assert.equal(wall.tabs[0].groups.length, 2);
+    assert.equal(wall.tabs[0].groups[1].name, 'Solo');
+    assert.equal(wall.tabs[0].groups[1].items.length, 0);
+  });
+
+  it('drops empty synthetic 未命名 groups', () => {
+    const wall = {
+      tabs: [
+        {
+          id: '10',
+          name: 'Work',
+          groups: [
+            {
+              name: '未命名',
+              folderId: '10',
+              items: [
+                { id: 'c', title: 'C', url: 'https://c.example/', parentId: '10', index: 0 },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    assert.equal(removeItemFromWall(wall, 'c'), true);
+    assert.equal(wall.tabs[0].groups.length, 0);
   });
 
   it('returns false when id is missing', () => {

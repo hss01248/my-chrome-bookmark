@@ -6,7 +6,12 @@ import {
   createArgsFromSnapshot,
   removeItemFromWall,
 } from './lib/bookmark-delete.js';
-import { normalizeBookmarkUpdate } from './lib/bookmark-edit.js';
+import {
+  normalizeBookmarkUpdate,
+  normalizeFolderTitle,
+  resolveNewFolderIndex,
+  DEFAULT_FOLDER_TITLE,
+} from './lib/bookmark-edit.js';
 import {
   isNoOpVisualReorder,
   resolveDropDestination,
@@ -59,6 +64,11 @@ let contextMenuEl = null;
 let editPopoverEl = null;
 /** @type {string | null} */
 let editingBookmarkId = null;
+/** @type {'bookmark' | 'folder' | null} */
+let editPopoverKind = null;
+/** After creating a Tab folder, select it on next reload. */
+/** @type {string | null} */
+let pendingSelectTabId = null;
 /** @type {number} */
 let suppressClickUntil = 0;
 /** @type {HTMLElement | null} */
@@ -265,22 +275,118 @@ function applyScrollAfterRender() {
   syncChromeCompact();
 }
 
+/**
+ * @param {string} folderId
+ * @param {string} name
+ * @param {DOMRect} rect
+ */
+function openRenameFolderPopover(folderId, name, rect) {
+  showFolderPopover({
+    mode: 'rename',
+    folderId,
+    title: name,
+    x: rect.right,
+    y: rect.bottom + 4,
+  });
+}
+
 function renderTabs() {
   tabsEl.innerHTML = '';
+  const searching = Boolean(searchEl.value.trim());
+  /** @type {typeof wall.tabs} */
+  const realTabs = [];
+  /** @type {(typeof wall.tabs)[0] | null} */
+  let unnamedTab = null;
   for (const tab of wall.tabs) {
+    if (tab.id === '__unnamed__') unnamedTab = tab;
+    else realTabs.push(tab);
+  }
+
+  for (const tab of realTabs) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'tab';
-    btn.textContent = tab.name;
-    if (tab.id !== '__unnamed__') {
-      btn.dataset.folderId = tab.id;
-      btn.dataset.folderDrag = 'tab';
-    }
+    btn.dataset.folderId = tab.id;
+    btn.dataset.folderDrag = 'tab';
     btn.setAttribute('aria-selected', String(tab.id === selectedTabId));
+
+    const label = document.createElement('span');
+    label.className = 'tab-label';
+    label.textContent = tab.name;
+
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'folder-action folder-edit';
+    edit.title = '重命名';
+    edit.setAttribute('aria-label', `重命名 ${tab.name}`);
+    edit.textContent = '✎';
+    edit.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      hideContextMenu();
+      const rect = edit.getBoundingClientRect();
+      openRenameFolderPopover(tab.id, tab.name, rect);
+    });
+
+    btn.append(label, edit);
     btn.addEventListener('click', () => {
       if (Date.now() < suppressTabClickUntil) return;
       if (tab.id === selectedTabId && !searchEl.value.trim()) return;
       selectedTabId = tab.id;
+      searchEl.value = '';
+      mainEl.scrollTop = 0;
+      syncChromeCompact();
+      render();
+    });
+    btn.addEventListener('dblclick', (event) => {
+      if (event.target instanceof Element && event.target.closest('.folder-action')) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      hideContextMenu();
+      const rect = btn.getBoundingClientRect();
+      openRenameFolderPopover(tab.id, tab.name, rect);
+    });
+    tabsEl.appendChild(btn);
+  }
+
+  if (!searching) {
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'tab tab-add';
+    add.title = '新建 Tab';
+    add.setAttribute('aria-label', '新建 Tab');
+    add.textContent = '+';
+    add.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      hideContextMenu();
+      const rect = add.getBoundingClientRect();
+      showFolderPopover({
+        mode: 'create',
+        kind: 'tab',
+        parentId: bookmarkBarId,
+        x: rect.right,
+        y: rect.bottom + 4,
+      });
+    });
+    tabsEl.appendChild(add);
+  }
+
+  if (unnamedTab) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'tab';
+    btn.textContent = unnamedTab.name;
+    btn.setAttribute(
+      'aria-selected',
+      String(unnamedTab.id === selectedTabId)
+    );
+    btn.addEventListener('click', () => {
+      if (Date.now() < suppressTabClickUntil) return;
+      if (unnamedTab.id === selectedTabId && !searchEl.value.trim()) return;
+      selectedTabId = unnamedTab.id;
       searchEl.value = '';
       mainEl.scrollTop = 0;
       syncChromeCompact();
@@ -506,7 +612,19 @@ function applyLocalBookmarkRemoval(id) {
       grid instanceof HTMLElement &&
       !grid.querySelector('.item[data-bookmark-id]')
     ) {
-      section?.remove();
+      const isRealFolder = Boolean(
+        section?.querySelector('.group-title[data-folder-drag="group"]')
+      );
+      if (isRealFolder) {
+        if (!grid.querySelector('.group-empty')) {
+          const empty = document.createElement('p');
+          empty.className = 'group-empty';
+          empty.textContent = '暂无书签';
+          grid.appendChild(empty);
+        }
+      } else {
+        section?.remove();
+      }
     }
   }
 
@@ -519,7 +637,14 @@ function applyLocalBookmarkRemoval(id) {
       const tab = wall.tabs.find((t) => t.id === selectedTabId);
       if (!tab?.groups.length) {
         hideGroupNav();
-        mainEl.innerHTML = `<p class="empty">这里还没有书签</p>`;
+        mainEl.innerHTML = '';
+        const empty = document.createElement('p');
+        empty.className = 'empty';
+        empty.textContent = '这里还没有书签';
+        mainEl.appendChild(empty);
+        if (selectedTabId && selectedTabId !== '__unnamed__') {
+          mainEl.appendChild(buildGroupAddButton());
+        }
       } else {
         refreshGroupNavFromDom();
       }
@@ -540,11 +665,14 @@ function applyLocalBookmarkMoveDom(draggedId, targetFolderId, beforeItemId) {
   const el = mainEl.querySelector(`.item[data-bookmark-id="${draggedId}"]`);
   if (!(el instanceof HTMLElement)) return false;
 
+  const sourceSection = el.closest('section.group');
   const targetSection = mainEl.querySelector(
     `section.group[data-folder-id="${targetFolderId}"]`
   );
   const grid = targetSection?.querySelector('.grid');
   if (!(grid instanceof HTMLElement)) return false;
+
+  grid.querySelector('.group-empty')?.remove();
 
   const beforeEl = beforeItemId
     ? grid.querySelector(`.item[data-bookmark-id="${beforeItemId}"]`)
@@ -555,10 +683,28 @@ function applyLocalBookmarkMoveDom(draggedId, targetFolderId, beforeItemId) {
     grid.appendChild(el);
   }
 
-  for (const section of [...mainEl.querySelectorAll('section.group')]) {
-    const g = section.querySelector('.grid');
-    if (g && !g.querySelector('.item[data-bookmark-id]')) {
-      section.remove();
+  if (
+    sourceSection instanceof HTMLElement &&
+    sourceSection !== targetSection
+  ) {
+    const sourceGrid = sourceSection.querySelector('.grid');
+    if (
+      sourceGrid &&
+      !sourceGrid.querySelector('.item[data-bookmark-id]')
+    ) {
+      const isRealFolder = Boolean(
+        sourceSection.querySelector('.group-title[data-folder-drag="group"]')
+      );
+      if (isRealFolder) {
+        if (!sourceGrid.querySelector('.group-empty')) {
+          const empty = document.createElement('p');
+          empty.className = 'group-empty';
+          empty.textContent = '暂无书签';
+          sourceGrid.appendChild(empty);
+        }
+      } else {
+        sourceSection.remove();
+      }
     }
   }
   refreshGroupNavFromDom();
@@ -694,6 +840,7 @@ function ensureEditPopoverEl() {
 
 function hideEditPopover() {
   editingBookmarkId = null;
+  editPopoverKind = null;
   if (!editPopoverEl) return;
   editPopoverEl.hidden = true;
   editPopoverEl.innerHTML = '';
@@ -706,7 +853,9 @@ function hideEditPopover() {
  */
 function showEditPopover(item, x, y) {
   const pop = ensureEditPopoverEl();
+  editPopoverKind = 'bookmark';
   editingBookmarkId = item.id;
+  pop.setAttribute('aria-label', '编辑书签');
   pop.innerHTML = '';
 
   const form = document.createElement('form');
@@ -784,6 +933,139 @@ function showEditPopover(item, x, y) {
 }
 
 /**
+ * @param {{
+ *   mode: 'create' | 'rename',
+ *   kind?: 'tab' | 'group',
+ *   folderId?: string,
+ *   parentId?: string,
+ *   title?: string,
+ *   x: number,
+ *   y: number,
+ * }} opts
+ */
+function showFolderPopover(opts) {
+  const pop = ensureEditPopoverEl();
+  editPopoverKind = 'folder';
+  editingBookmarkId = null;
+  const isCreate = opts.mode === 'create';
+  pop.setAttribute(
+    'aria-label',
+    isCreate ? '新建文件夹' : '重命名文件夹'
+  );
+  pop.innerHTML = '';
+
+  const form = document.createElement('form');
+  form.className = 'edit-popover-form';
+
+  const titleLabel = document.createElement('label');
+  titleLabel.className = 'edit-field';
+  const titleCaption = document.createElement('span');
+  titleCaption.textContent = '名称';
+  const titleInput = document.createElement('input');
+  titleInput.type = 'text';
+  titleInput.name = 'title';
+  titleInput.value = isCreate
+    ? DEFAULT_FOLDER_TITLE
+    : opts.title || DEFAULT_FOLDER_TITLE;
+  titleInput.autocomplete = 'off';
+  titleInput.required = true;
+  titleLabel.append(titleCaption, titleInput);
+
+  const errorEl = document.createElement('p');
+  errorEl.className = 'edit-error';
+  errorEl.hidden = true;
+
+  const actions = document.createElement('div');
+  actions.className = 'edit-actions';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'edit-btn edit-btn-cancel';
+  cancelBtn.textContent = '取消';
+  cancelBtn.addEventListener('click', () => hideEditPopover());
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'submit';
+  saveBtn.className = 'edit-btn edit-btn-save';
+  saveBtn.textContent = isCreate ? '创建' : '保存';
+  actions.append(cancelBtn, saveBtn);
+
+  form.append(titleLabel, errorEl, actions);
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const title = normalizeFolderTitle(titleInput.value);
+    if (!title) {
+      errorEl.hidden = false;
+      errorEl.textContent = '名称不能为空';
+      titleInput.focus();
+      return;
+    }
+    if (isCreate) {
+      if (!opts.parentId || !opts.kind) return;
+      void createFolder({
+        parentId: opts.parentId,
+        title,
+        kind: opts.kind,
+        errorEl,
+      });
+    } else {
+      if (!opts.folderId) return;
+      void renameFolder({
+        folderId: opts.folderId,
+        title,
+        errorEl,
+      });
+    }
+  });
+
+  pop.appendChild(form);
+  pop.hidden = false;
+
+  pop.style.left = '0px';
+  pop.style.top = '0px';
+  const rect = pop.getBoundingClientRect();
+  const left = Math.min(opts.x, window.innerWidth - rect.width - 8);
+  const top = Math.min(opts.y, window.innerHeight - rect.height - 8);
+  pop.style.left = `${Math.max(8, left)}px`;
+  pop.style.top = `${Math.max(8, top)}px`;
+
+  titleInput.focus();
+  titleInput.select();
+}
+
+/**
+ * @param {{ parentId: string, title: string, kind: 'tab' | 'group', errorEl: HTMLElement }} args
+ */
+async function createFolder({ parentId, title, kind, errorEl }) {
+  try {
+    const children = await chrome.bookmarks.getChildren(parentId);
+    const index = resolveNewFolderIndex(children);
+    const node = await chrome.bookmarks.create({ parentId, title, index });
+    if (kind === 'tab' && node?.id) {
+      pendingSelectTabId = node.id;
+      selectedTabId = node.id;
+    }
+    hideEditPopover();
+  } catch (err) {
+    console.error('Failed to create folder', err);
+    errorEl.hidden = false;
+    errorEl.textContent = '创建失败，请重试';
+  }
+}
+
+/**
+ * @param {{ folderId: string, title: string, errorEl: HTMLElement }} args
+ */
+async function renameFolder({ folderId, title, errorEl }) {
+  try {
+    await chrome.bookmarks.update(folderId, { title });
+    hideEditPopover();
+  } catch (err) {
+    console.error('Failed to rename folder', err);
+    errorEl.hidden = false;
+    errorEl.textContent = '重命名失败，请重试';
+  }
+}
+
+/**
  * @param {string} id
  * @param {{ title: string, url: string }} changes
  */
@@ -827,9 +1109,20 @@ async function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
   pendingNavSection = null;
   mainEl.innerHTML = '';
 
+  const canAddGroup =
+    Boolean(selectedTabId) &&
+    selectedTabId !== '__unnamed__' &&
+    !searchEl.value.trim();
+
   if (!groups.length) {
     hideGroupNav();
-    mainEl.innerHTML = `<p class="empty">这里还没有书签</p>`;
+    const empty = document.createElement('p');
+    empty.className = 'empty';
+    empty.textContent = '这里还没有书签';
+    mainEl.appendChild(empty);
+    if (canAddGroup) {
+      mainEl.appendChild(buildGroupAddButton());
+    }
     groupsFillGeneration = generation;
     applyScrollAfterRender();
     return;
@@ -842,6 +1135,9 @@ async function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
 
   // Phase 1: paint group shells + side nav immediately.
   const shellFrag = document.createDocumentFragment();
+  /** @type {HTMLElement | null} */
+  let unnamedSection = null;
+
   for (let i = 0; i < groups.length; i++) {
     const group = groups[i];
     const id = `group-${i}`;
@@ -849,6 +1145,11 @@ async function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
     section.className = 'group';
     section.id = id;
     section.dataset.folderId = group.folderId;
+
+    const parentFolderId =
+      selectedTabId === '__unnamed__' ? bookmarkBarId : selectedTabId;
+    const isSyntheticUnnamed =
+      group.name === UNNAMED && group.folderId === parentFolderId;
 
     const onlyUnnamed =
       hideSingleUnnamedTitle &&
@@ -858,29 +1159,83 @@ async function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
       const h = document.createElement('h2');
       h.className =
         'group-title' + (group.name === UNNAMED ? ' is-unnamed' : '');
-      if (group.name !== UNNAMED && group.folderId) {
+
+      const titleText = document.createElement('span');
+      titleText.className = 'group-title-text';
+      titleText.textContent = group.name;
+      h.appendChild(titleText);
+
+      if (!isSyntheticUnnamed && group.folderId) {
         h.dataset.folderId = group.folderId;
         h.dataset.folderDrag = 'group';
+
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = 'folder-action folder-edit';
+        edit.title = '重命名';
+        edit.setAttribute('aria-label', `重命名 ${group.name}`);
+        edit.textContent = '✎';
+        edit.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          hideContextMenu();
+          const rect = edit.getBoundingClientRect();
+          openRenameFolderPopover(group.folderId, group.name, rect);
+        });
+        h.appendChild(edit);
+
+        h.addEventListener('dblclick', (event) => {
+          if (
+            event.target instanceof Element &&
+            event.target.closest('.folder-action')
+          ) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          hideContextMenu();
+          const rect = h.getBoundingClientRect();
+          openRenameFolderPopover(group.folderId, group.name, rect);
+        });
       }
-      h.textContent = group.name;
       section.appendChild(h);
     }
 
     const grid = document.createElement('div');
     grid.className = 'grid';
     grid.dataset.folderId = group.folderId;
+    if (!group.items.length) {
+      const empty = document.createElement('p');
+      empty.className = 'group-empty';
+      empty.textContent = '暂无书签';
+      grid.appendChild(empty);
+    }
     section.appendChild(grid);
     shellFrag.appendChild(section);
+
+    if (isSyntheticUnnamed) {
+      unnamedSection = section;
+    }
 
     navSections.push({
       id,
       name: group.name,
       section,
       folderId:
-        group.name !== UNNAMED && group.folderId ? group.folderId : null,
+        !isSyntheticUnnamed && group.folderId ? group.folderId : null,
     });
     jobs.push({ grid, items: group.items });
   }
+
+  if (canAddGroup) {
+    const addEl = buildGroupAddButton();
+    if (unnamedSection) {
+      shellFrag.insertBefore(addEl, unnamedSection);
+    } else {
+      shellFrag.appendChild(addEl);
+    }
+  }
+
   mainEl.appendChild(shellFrag);
   renderGroupNav(navSections);
   await nextFrame();
@@ -888,6 +1243,7 @@ async function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
 
   // Phase 2: fill bookmark cards in chunks.
   for (const job of jobs) {
+    if (!job.items.length) continue;
     const ok = await fillGridChunked(job.grid, job.items, generation);
     if (!ok) return;
   }
@@ -896,6 +1252,33 @@ async function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
   applyScrollAfterRender();
   flushPendingNavScroll();
   syncGroupNavActiveFromScroll();
+}
+
+function buildGroupAddButton() {
+  const wrap = document.createElement('div');
+  wrap.className = 'group-add-row';
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'group-add';
+  add.title = '新建分组';
+  add.setAttribute('aria-label', '新建分组');
+  add.textContent = '+ 新建分组';
+  add.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    hideContextMenu();
+    if (!selectedTabId || selectedTabId === '__unnamed__') return;
+    const rect = add.getBoundingClientRect();
+    showFolderPopover({
+      mode: 'create',
+      kind: 'group',
+      parentId: selectedTabId,
+      x: rect.left,
+      y: rect.bottom + 4,
+    });
+  });
+  wrap.appendChild(add);
+  return wrap;
 }
 
 async function renderSearchResults(query) {
@@ -952,7 +1335,8 @@ function render() {
 
 async function reload() {
   const tree = await chrome.bookmarks.getTree();
-  const prev = selectedTabId;
+  const prev = pendingSelectTabId || selectedTabId;
+  pendingSelectTabId = null;
   wall = buildBookmarkWall(tree[0]);
   bookmarkBarId = findBookmarkBar(tree[0])?.id ?? '1';
   if (prev && wall.tabs.some((t) => t.id === prev)) {
@@ -1470,10 +1854,14 @@ function updateFolderDropTarget(clientX, clientY) {
         (el) =>
           el instanceof HTMLElement &&
           el.classList.contains('tab') &&
-          !el.dataset.folderDrag
+          !el.dataset.folderDrag &&
+          !el.classList.contains('tab-add')
       );
-      if (unnamed) {
-        tabsEl.insertBefore(indicator, unnamed);
+      const addBtn = tabsEl.querySelector('.tab-add');
+      const insertBefore =
+        (addBtn instanceof HTMLElement ? addBtn : null) || unnamed;
+      if (insertBefore) {
+        tabsEl.insertBefore(indicator, insertBefore);
       } else {
         tabsEl.appendChild(indicator);
       }
@@ -1554,8 +1942,11 @@ function updateFolderDropTarget(clientX, clientY) {
         el instanceof HTMLElement &&
         !el.querySelector('.group-title[data-folder-drag="group"]')
     );
-    if (unnamedSection) {
-      mainEl.insertBefore(indicator, unnamedSection);
+    const addRow = mainEl.querySelector('.group-add-row');
+    const insertBefore =
+      (addRow instanceof HTMLElement ? addRow : null) || unnamedSection;
+    if (insertBefore) {
+      mainEl.insertBefore(indicator, insertBefore);
     } else {
       mainEl.appendChild(indicator);
     }
@@ -1581,12 +1972,16 @@ function applyLocalFolderMoveDom(kind, folderId, beforeId) {
       (node) =>
         node instanceof HTMLElement &&
         node.classList.contains('tab') &&
-        !node.dataset.folderDrag
+        !node.dataset.folderDrag &&
+        !node.classList.contains('tab-add')
     );
+    const addBtn = tabsEl.querySelector('.tab-add');
+    const appendBefore =
+      (addBtn instanceof HTMLElement ? addBtn : null) || unnamed;
     if (beforeEl instanceof HTMLElement) {
       tabsEl.insertBefore(el, beforeEl);
-    } else if (unnamed instanceof HTMLElement) {
-      tabsEl.insertBefore(el, unnamed);
+    } else if (appendBefore instanceof HTMLElement) {
+      tabsEl.insertBefore(el, appendBefore);
     } else {
       tabsEl.appendChild(el);
     }
@@ -1610,11 +2005,14 @@ function applyLocalFolderMoveDom(kind, folderId, beforeId) {
       node instanceof HTMLElement &&
       !node.querySelector('.group-title[data-folder-drag="group"]')
   );
+  const addRow = mainEl.querySelector('.group-add-row');
+  const appendBefore =
+    (addRow instanceof HTMLElement ? addRow : null) || unnamedSection;
 
   if (beforeSection instanceof HTMLElement) {
     mainEl.insertBefore(section, beforeSection);
-  } else if (unnamedSection instanceof HTMLElement) {
-    mainEl.insertBefore(section, unnamedSection);
+  } else if (appendBefore instanceof HTMLElement) {
+    mainEl.insertBefore(section, appendBefore);
   } else {
     mainEl.appendChild(section);
   }
@@ -1671,6 +2069,9 @@ function onFolderDragPointerDown(event) {
   if (moveInFlight || dragSession || folderDragSession) return;
   const target = event.target;
   if (!(target instanceof Element)) return;
+  if (target.closest('.folder-action, .tab-add, .group-add, .group-add-row')) {
+    return;
+  }
 
   const handle = target.closest('[data-folder-drag]');
   if (!(handle instanceof HTMLElement)) return;
@@ -1808,7 +2209,15 @@ document.addEventListener('click', (event) => {
   }
   if (editPopoverEl && !editPopoverEl.hidden && !editPopoverEl.contains(target)) {
     // Ignore clicks on the edit button that opened the popover in the same tick.
-    if (target instanceof Element && target.closest('.item-edit')) return;
+    if (
+      target instanceof Element &&
+      (target.closest('.item-edit') ||
+        target.closest('.folder-edit') ||
+        target.closest('.tab-add') ||
+        target.closest('.group-add'))
+    ) {
+      return;
+    }
     hideEditPopover();
   }
 });
