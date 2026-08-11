@@ -132,6 +132,36 @@ function syncChromeCompact() {
   chromeEl.classList.toggle('is-compact', mainEl.scrollTop > 8);
 }
 
+/**
+ * Highlight the group-nav button for the section nearest the main viewport top.
+ */
+function syncGroupNavActiveFromScroll() {
+  if (!groupNavEl || groupNavEl.hidden) return;
+  const sections = [...mainEl.querySelectorAll('section.group')];
+  if (!sections.length) return;
+
+  const anchor = mainEl.getBoundingClientRect().top + 24;
+  let active = /** @type {HTMLElement} */ (sections[0]);
+  for (const section of sections) {
+    if (!(section instanceof HTMLElement)) continue;
+    if (section.getBoundingClientRect().top <= anchor) {
+      active = section;
+    } else {
+      break;
+    }
+  }
+
+  const activeId = active.id;
+  let activeBtn = null;
+  for (const btn of groupNavEl.querySelectorAll('.group-nav-btn')) {
+    if (!(btn instanceof HTMLElement)) continue;
+    const on = btn.dataset.groupId === activeId;
+    btn.classList.toggle('is-active', on);
+    if (on) activeBtn = btn;
+  }
+  activeBtn?.scrollIntoView({ block: 'nearest' });
+}
+
 function hideGroupNav() {
   if (!groupNavEl) return;
   groupNavEl.hidden = true;
