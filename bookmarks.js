@@ -47,6 +47,8 @@ const SUPPRESS_CLICK_MS = 500;
 
 /** @type {{ timer: ReturnType<typeof setTimeout>, snapshot: import('./lib/bookmark-delete.js').UndoSnapshot } | null} */
 let pendingUndo = null;
+/** Removals initiated in this page — skip full reload when onRemoved fires. */
+const localHandledRemovals = new Set();
 /** @type {HTMLElement | null} */
 let toastEl = null;
 /** @type {HTMLElement | null} */
@@ -427,6 +429,61 @@ async function undoLastRemove() {
 }
 
 /**
+ * Rebuild left group nav from sections currently in the main pane.
+ */
+function refreshGroupNavFromDom() {
+  if (!groupNavEl) return;
+  const sections = [...mainEl.querySelectorAll('section.group')].map(
+    (section, i) => ({
+      id: section.id || `group-${i}`,
+      name:
+        section.querySelector('.group-title')?.textContent?.trim() || UNNAMED,
+      section: /** @type {HTMLElement} */ (section),
+    })
+  );
+  renderGroupNav(sections);
+}
+
+/**
+ * Drop one bookmark from wall + DOM without rebuilding the tab.
+ * @param {string} id
+ */
+function applyLocalBookmarkRemoval(id) {
+  removeItemFromWall(wall, id);
+
+  const el = mainEl.querySelector(`.item[data-bookmark-id="${id}"]`);
+  if (el instanceof HTMLElement) {
+    const section = el.closest('section.group');
+    const grid = el.closest('.grid');
+    el.remove();
+    if (
+      grid instanceof HTMLElement &&
+      !grid.querySelector('.item[data-bookmark-id]')
+    ) {
+      section?.remove();
+    }
+  }
+
+  if (!mainEl.querySelector('.item[data-bookmark-id]')) {
+    const q = searchEl.value.trim();
+    if (q) {
+      mainEl.innerHTML = `<p class="empty">无匹配书签</p>`;
+      hideGroupNav();
+    } else {
+      const tab = wall.tabs.find((t) => t.id === selectedTabId);
+      if (!tab?.groups.length) {
+        hideGroupNav();
+        mainEl.innerHTML = `<p class="empty">这里还没有书签</p>`;
+      } else {
+        refreshGroupNavFromDom();
+      }
+    }
+  } else if (!searchEl.value.trim()) {
+    refreshGroupNavFromDom();
+  }
+}
+
+/**
  * @param {string} id
  */
 async function removeBookmarkWithUndo(id) {
@@ -434,9 +491,12 @@ async function removeBookmarkWithUndo(id) {
     const nodes = await chrome.bookmarks.get(id);
     const snapshot = snapshotFromNode(nodes[0]);
     if (!snapshot) return;
+    localHandledRemovals.add(id);
     await chrome.bookmarks.remove(id);
+    applyLocalBookmarkRemoval(id);
     showUndoToast(snapshot);
   } catch (err) {
+    localHandledRemovals.delete(id);
     console.error('Failed to remove bookmark', err);
   }
 }
@@ -1507,7 +1567,11 @@ for (const ev of [
   'onMoved',
   'onChildrenReordered',
 ]) {
-  chrome.bookmarks[ev].addListener(() => {
+  chrome.bookmarks[ev].addListener((id) => {
+    if (ev === 'onRemoved' && localHandledRemovals.has(id)) {
+      localHandledRemovals.delete(id);
+      return;
+    }
     reload();
   });
 }
