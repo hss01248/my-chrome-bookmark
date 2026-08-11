@@ -895,6 +895,7 @@ async function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
   groupsFillGeneration = generation;
   applyScrollAfterRender();
   flushPendingNavScroll();
+  syncGroupNavActiveFromScroll();
 }
 
 async function renderSearchResults(query) {
@@ -968,7 +969,19 @@ searchEl.addEventListener('input', () => {
   render();
 });
 
-mainEl.addEventListener('scroll', syncChromeCompact, { passive: true });
+let mainScrollRaf = 0;
+mainEl.addEventListener(
+  'scroll',
+  () => {
+    syncChromeCompact();
+    if (mainScrollRaf) return;
+    mainScrollRaf = requestAnimationFrame(() => {
+      mainScrollRaf = 0;
+      syncGroupNavActiveFromScroll();
+    });
+  },
+  { passive: true }
+);
 mainEl.addEventListener(
   'scroll',
   () => {
