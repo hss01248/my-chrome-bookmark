@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   snapshotFromNode,
   createArgsFromSnapshot,
+  removeItemFromWall,
 } from '../lib/bookmark-delete.js';
 
 describe('snapshotFromNode', () => {
@@ -46,5 +47,49 @@ describe('createArgsFromSnapshot', () => {
         url: 'https://claude.example/',
       }
     );
+  });
+});
+
+describe('removeItemFromWall', () => {
+  it('removes an item and drops empty groups', () => {
+    const wall = {
+      tabs: [
+        {
+          id: '10',
+          name: 'Work',
+          groups: [
+            {
+              name: 'AI',
+              folderId: '20',
+              items: [
+                { id: 'a', title: 'A', url: 'https://a.example/', parentId: '20', index: 0 },
+                { id: 'b', title: 'B', url: 'https://b.example/', parentId: '20', index: 1 },
+              ],
+            },
+            {
+              name: 'Solo',
+              folderId: '21',
+              items: [
+                { id: 'c', title: 'C', url: 'https://c.example/', parentId: '21', index: 0 },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    assert.equal(removeItemFromWall(wall, 'b'), true);
+    assert.deepEqual(
+      wall.tabs[0].groups[0].items.map((i) => i.id),
+      ['a']
+    );
+
+    assert.equal(removeItemFromWall(wall, 'c'), true);
+    assert.equal(wall.tabs[0].groups.length, 1);
+    assert.equal(wall.tabs[0].groups[0].name, 'AI');
+  });
+
+  it('returns false when id is missing', () => {
+    assert.equal(removeItemFromWall({ tabs: [] }, 'x'), false);
   });
 });

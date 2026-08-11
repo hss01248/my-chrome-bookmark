@@ -4,6 +4,7 @@ import { faviconUrlFor, PLACEHOLDER_FAVICON } from './lib/favicon.js';
 import {
   snapshotFromNode,
   createArgsFromSnapshot,
+  removeItemFromWall,
 } from './lib/bookmark-delete.js';
 import { normalizeBookmarkUpdate } from './lib/bookmark-edit.js';
 import {
