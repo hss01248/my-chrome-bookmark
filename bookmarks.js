@@ -98,6 +98,8 @@ let dragSession = null;
 let folderDragSession = null;
 /** Swallow tab clicks until this time (after an active tab folder drag). */
 let suppressTabClickUntil = 0;
+/** Swallow group-nav clicks until this time (after nav folder drag). */
+let suppressNavClickUntil = 0;
 /** Cached bookmark bar folder id (Chrome usually `'1'`). */
 let bookmarkBarId = '1';
 /** @type {HTMLElement | null} */
@@ -166,17 +168,22 @@ function renderGroupNav(sections) {
     return;
   }
   groupNavEl.hidden = false;
-  for (const { id, name, section } of sections) {
+  for (const { id, name, section, folderId = null } of sections) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'group-nav-btn';
     btn.title = name;
     btn.dataset.groupId = id;
+    if (folderId) {
+      btn.dataset.folderId = folderId;
+      btn.dataset.folderDrag = 'group';
+    }
     const label = document.createElement('span');
     label.className = 'group-nav-btn-label';
     label.textContent = name;
     btn.appendChild(label);
     btn.addEventListener('click', () => {
+      if (Date.now() < suppressNavClickUntil) return;
       for (const b of groupNavEl.querySelectorAll('.group-nav-btn')) {
         b.classList.toggle('is-active', b === btn);
       }
@@ -436,12 +443,19 @@ async function undoLastRemove() {
 function refreshGroupNavFromDom() {
   if (!groupNavEl) return;
   const sections = [...mainEl.querySelectorAll('section.group')].map(
-    (section, i) => ({
-      id: section.id || `group-${i}`,
-      name:
-        section.querySelector('.group-title')?.textContent?.trim() || UNNAMED,
-      section: /** @type {HTMLElement} */ (section),
-    })
+    (section, i) => {
+      const title = section.querySelector(
+        '.group-title[data-folder-drag="group"]'
+      );
+      return {
+        id: section.id || `group-${i}`,
+        name:
+          section.querySelector('.group-title')?.textContent?.trim() || UNNAMED,
+        section: /** @type {HTMLElement} */ (section),
+        folderId:
+          title instanceof HTMLElement ? title.dataset.folderId || null : null,
+      };
+    }
   );
   renderGroupNav(sections);
 }
@@ -828,7 +842,13 @@ async function renderGroups(groups, { hideSingleUnnamedTitle = false } = {}) {
     section.appendChild(grid);
     shellFrag.appendChild(section);
 
-    navSections.push({ id, name: group.name, section });
+    navSections.push({
+      id,
+      name: group.name,
+      section,
+      folderId:
+        group.name !== UNNAMED && group.folderId ? group.folderId : null,
+    });
     jobs.push({ grid, items: group.items });
   }
   mainEl.appendChild(shellFrag);
@@ -1290,7 +1310,11 @@ function clearFolderDropIndicator() {
  */
 function ensureFolderDropIndicator(kind) {
   const className =
-    kind === 'tab' ? 'tab-drop-indicator' : 'group-drop-indicator';
+    kind === 'tab'
+      ? 'tab-drop-indicator'
+      : kind === 'group-nav'
+        ? 'group-nav-drop-indicator'
+        : 'group-drop-indicator';
   if (
     folderDropIndicatorEl &&
     folderDropIndicatorEl.className === className
@@ -1342,6 +1366,12 @@ function activateFolderDragSession() {
   const { sourceEl, pointerId, startX, startY, kind } = folderDragSession;
   if (kind === 'tab') {
     suppressTabClickUntil = Date.now() + SUPPRESS_CLICK_MS;
+  } else if (
+    kind === 'group' &&
+    groupNavEl &&
+    groupNavEl.contains(sourceEl)
+  ) {
+    suppressNavClickUntil = Date.now() + SUPPRESS_CLICK_MS;
   }
 
   sourceEl.classList.add('is-folder-dragging');
@@ -1403,6 +1433,50 @@ function updateFolderDropTarget(clientX, clientY) {
         tabsEl.insertBefore(indicator, unnamed);
       } else {
         tabsEl.appendChild(indicator);
+      }
+      folderDragSession.beforeId = null;
+    }
+    return;
+  }
+
+  const navRect = groupNavEl?.getBoundingClientRect();
+  const overNav =
+    groupNavEl &&
+    !groupNavEl.hidden &&
+    navRect &&
+    clientX >= navRect.left &&
+    clientX <= navRect.right &&
+    clientY >= navRect.top &&
+    clientY <= navRect.bottom;
+
+  if (overNav) {
+    const navBtns = [
+      ...groupNavEl.querySelectorAll('.group-nav-btn[data-folder-drag="group"]'),
+    ].filter((el) => el instanceof HTMLElement);
+    folderDragSession.folderIds = navBtns
+      .map((el) => el.dataset.folderId)
+      .filter(Boolean);
+    const candidates = navBtns.filter((el) => el.dataset.folderId !== folderId);
+    let beforeBtn = null;
+    for (const el of candidates) {
+      const box = el.getBoundingClientRect();
+      if (clientY < box.top + box.height / 2) {
+        beforeBtn = el;
+        break;
+      }
+    }
+    const indicator = ensureFolderDropIndicator('group-nav');
+    if (beforeBtn) {
+      groupNavEl.insertBefore(indicator, beforeBtn);
+      folderDragSession.beforeId = beforeBtn.dataset.folderId ?? null;
+    } else {
+      const unnamedBtn = [...groupNavEl.querySelectorAll('.group-nav-btn')].find(
+        (el) => el instanceof HTMLElement && !el.dataset.folderDrag
+      );
+      if (unnamedBtn) {
+        groupNavEl.insertBefore(indicator, unnamedBtn);
+      } else {
+        groupNavEl.appendChild(indicator);
       }
       folderDragSession.beforeId = null;
     }
@@ -1557,7 +1631,9 @@ function onFolderDragPointerDown(event) {
 
   const handle = target.closest('[data-folder-drag]');
   if (!(handle instanceof HTMLElement)) return;
-  if (!tabsEl.contains(handle) && !mainEl.contains(handle)) return;
+  if (!tabsEl.contains(handle) && !mainEl.contains(handle)) {
+    if (!groupNavEl || !groupNavEl.contains(handle)) return;
+  }
 
   const kind = handle.dataset.folderDrag;
   const folderId = handle.dataset.folderId;
