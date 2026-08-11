@@ -49,6 +49,8 @@ const SUPPRESS_CLICK_MS = 500;
 let pendingUndo = null;
 /** Removals initiated in this page — skip full reload when onRemoved fires. */
 const localHandledRemovals = new Set();
+/** Moves initiated in this page — skip full reload when onMoved fires. */
+const localHandledMoves = new Set();
 /** @type {HTMLElement | null} */
 let toastEl = null;
 /** @type {HTMLElement | null} */
@@ -480,6 +482,71 @@ function applyLocalBookmarkRemoval(id) {
     }
   } else if (!searchEl.value.trim()) {
     refreshGroupNavFromDom();
+  }
+}
+
+/**
+ * Move a bookmark card in the DOM to the drop target without wiping the tab.
+ * @param {string} draggedId
+ * @param {string} targetFolderId
+ * @param {string | null} beforeItemId
+ * @returns {boolean}
+ */
+function applyLocalBookmarkMoveDom(draggedId, targetFolderId, beforeItemId) {
+  const el = mainEl.querySelector(`.item[data-bookmark-id="${draggedId}"]`);
+  if (!(el instanceof HTMLElement)) return false;
+
+  const targetSection = mainEl.querySelector(
+    `section.group[data-folder-id="${targetFolderId}"]`
+  );
+  const grid = targetSection?.querySelector('.grid');
+  if (!(grid instanceof HTMLElement)) return false;
+
+  const beforeEl = beforeItemId
+    ? grid.querySelector(`.item[data-bookmark-id="${beforeItemId}"]`)
+    : null;
+  if (beforeEl instanceof HTMLElement && beforeEl !== el) {
+    grid.insertBefore(el, beforeEl);
+  } else if (!beforeEl) {
+    grid.appendChild(el);
+  }
+
+  for (const section of [...mainEl.querySelectorAll('section.group')]) {
+    const g = section.querySelector('.grid');
+    if (g && !g.querySelector('.item[data-bookmark-id]')) {
+      section.remove();
+    }
+  }
+  refreshGroupNavFromDom();
+  return true;
+}
+
+/**
+ * Refresh wall + item dataset parentId/index without rebuilding DOM.
+ */
+async function softSyncWallFromTree() {
+  const tree = await chrome.bookmarks.getTree();
+  wall = buildBookmarkWall(tree[0]);
+  bookmarkBarId = findBookmarkBar(tree[0])?.id ?? '1';
+
+  /** @type {Map<string, { parentId: string, index: number }>} */
+  const byId = new Map();
+  for (const tab of wall.tabs) {
+    for (const group of tab.groups) {
+      for (const item of group.items) {
+        byId.set(item.id, {
+          parentId: item.parentId ?? '',
+          index: item.index ?? 0,
+        });
+      }
+    }
+  }
+  for (const node of mainEl.querySelectorAll('.item[data-bookmark-id]')) {
+    if (!(node instanceof HTMLElement)) continue;
+    const meta = byId.get(node.dataset.bookmarkId || '');
+    if (!meta) continue;
+    node.dataset.parentId = meta.parentId;
+    node.dataset.index = String(meta.index);
   }
 }
 
@@ -1043,10 +1110,26 @@ async function commitBookmarkMove(dragged, targetFolderId, beforeItem, visualIte
   ) {
     return;
   }
-  if (destination.parentId !== dragged.parentId) {
-    rememberScrollToBookmark(dragged.id);
+  localHandledMoves.add(dragged.id);
+  try {
+    await chrome.bookmarks.move(dragged.id, destination);
+    const ok = applyLocalBookmarkMoveDom(
+      dragged.id,
+      targetFolderId,
+      beforeItem ? beforeItem.id : null
+    );
+    if (!ok) {
+      localHandledMoves.delete(dragged.id);
+      await reload();
+      return;
+    }
+    void softSyncWallFromTree().catch((err) => {
+      console.error('Failed to soft-sync wall after move', err);
+    });
+  } catch (err) {
+    localHandledMoves.delete(dragged.id);
+    throw err;
   }
-  await chrome.bookmarks.move(dragged.id, destination);
 }
 
 /**
@@ -1570,6 +1653,10 @@ for (const ev of [
   chrome.bookmarks[ev].addListener((id) => {
     if (ev === 'onRemoved' && localHandledRemovals.has(id)) {
       localHandledRemovals.delete(id);
+      return;
+    }
+    if (ev === 'onMoved' && localHandledMoves.has(id)) {
+      localHandledMoves.delete(id);
       return;
     }
     reload();
