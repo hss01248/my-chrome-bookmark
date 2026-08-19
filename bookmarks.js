@@ -49,6 +49,11 @@ const DRAG_START_SLOP_PX = 12;
 const FOLDER_DRAG_SLOP_PX = 6;
 const STATUS_TOAST_MS = 2000;
 const SUPPRESS_CLICK_MS = 500;
+/** Hovering a left-nav entry this long during a drag scrolls main to it. */
+const NAV_SPRING_LOAD_MS = 500;
+/** Dragging within this distance of the nav's top/bottom edge scrolls the nav. */
+const NAV_AUTO_SCROLL_EDGE_PX = 48;
+const NAV_AUTO_SCROLL_STEP_PX = 8;
 
 /** @type {{ timer: ReturnType<typeof setTimeout>, snapshot: import('./lib/bookmark-delete.js').UndoSnapshot } | null} */
 let pendingUndo = null;
@@ -73,6 +78,12 @@ let pendingSelectTabId = null;
 let suppressClickUntil = 0;
 /** @type {HTMLElement | null} */
 let dropIndicatorEl = null;
+/** rAF loop scrolling the left nav while a card drag hovers its edge. */
+let navAutoScrollRaf = 0;
+/** -1 up, 1 down, 0 idle. */
+let navAutoScrollDir = 0;
+let lastDragX = 0;
+let lastDragY = 0;
 /**
  * @type {null | {
  *   pointerId: number,
@@ -87,6 +98,9 @@ let dropIndicatorEl = null;
  *   targetFolderId: string | null,
  *   beforeItem: { id: string, parentId: string, index: number } | null,
  *   visualItems: { id: string, parentId: string, index: number }[],
+ *   viaNav: boolean,
+ *   navHoverBtn: HTMLElement | null,
+ *   navHoverTimer: ReturnType<typeof setTimeout> | null,
  * }}
  */
 let dragSession = null;
@@ -214,14 +228,28 @@ function renderGroupNav(sections) {
     btn.className = 'group-nav-btn';
     btn.title = name;
     btn.dataset.groupId = id;
-    if (folderId) {
-      btn.dataset.folderId = folderId;
-      btn.dataset.folderDrag = 'group';
-    }
     const label = document.createElement('span');
     label.className = 'group-nav-btn-label';
     label.textContent = name;
     btn.appendChild(label);
+    if (folderId) {
+      btn.dataset.folderId = folderId;
+      btn.dataset.folderDrag = 'group';
+
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'folder-action folder-edit';
+      edit.title = '重命名';
+      edit.setAttribute('aria-label', `重命名 ${name}`);
+      edit.textContent = '✎';
+      edit.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        hideContextMenu();
+        openRenameFolderPopover(folderId, name, edit.getBoundingClientRect());
+      });
+      btn.appendChild(edit);
+    }
     btn.addEventListener('click', () => {
       if (Date.now() < suppressNavClickUntil) return;
       for (const b of groupNavEl.querySelectorAll('.group-nav-btn')) {
@@ -583,10 +611,11 @@ function refreshGroupNavFromDom() {
       const title = section.querySelector(
         '.group-title[data-folder-drag="group"]'
       );
+      // Read the label span, not the title: the title also holds the ✎ button.
+      const text = section.querySelector('.group-title-text');
       return {
         id: section.id || `group-${i}`,
-        name:
-          section.querySelector('.group-title')?.textContent?.trim() || UNNAMED,
+        name: text?.textContent?.trim() || UNNAMED,
         section: /** @type {HTMLElement} */ (section),
         folderId:
           title instanceof HTMLElement ? title.dataset.folderId || null : null,
@@ -1386,6 +1415,9 @@ function clearDropTargetUi() {
   for (const el of mainEl.querySelectorAll('.group.is-drop-target')) {
     el.classList.remove('is-drop-target');
   }
+  for (const el of groupNavEl?.querySelectorAll('.is-drop-target') || []) {
+    el.classList.remove('is-drop-target');
+  }
   dropIndicatorEl?.remove();
 }
 
@@ -1426,8 +1458,129 @@ function findInsertBeforeEl(grid, clientX, clientY, excludeId) {
   return null;
 }
 
+/**
+ * @param {HTMLElement} grid
+ */
+function collectVisualItems(grid) {
+  return [...grid.querySelectorAll('.item[data-bookmark-id]')]
+    .map((el) => itemRefFromEl(el))
+    .filter(Boolean);
+}
+
+/**
+ * Aim the current drag at a whole group (append to its end).
+ * Used when hovering the left nav, where there is no grid geometry to read.
+ * @param {HTMLElement} section
+ * @returns {boolean}
+ */
+function aimDropAtGroupEnd(section) {
+  const folderId = section.dataset.folderId;
+  const grid = section.querySelector('.grid');
+  if (!folderId || !(grid instanceof HTMLElement)) return false;
+
+  section.classList.add('is-drop-target');
+  grid.appendChild(ensureDropIndicator());
+
+  dragSession.targetFolderId = folderId;
+  dragSession.beforeItem = null;
+  dragSession.visualItems = collectVisualItems(grid);
+  return true;
+}
+
+function stopNavAutoScroll() {
+  navAutoScrollDir = 0;
+  if (navAutoScrollRaf) {
+    cancelAnimationFrame(navAutoScrollRaf);
+    navAutoScrollRaf = 0;
+  }
+}
+
+function stepNavAutoScroll() {
+  navAutoScrollRaf = 0;
+  if (!navAutoScrollDir || !groupNavEl) return;
+  const before = groupNavEl.scrollTop;
+  groupNavEl.scrollTop += navAutoScrollDir * NAV_AUTO_SCROLL_STEP_PX;
+  if (groupNavEl.scrollTop === before) return;
+  // Pointer may be still while entries slide under it — re-aim the drop.
+  updateDropTarget(lastDragX, lastDragY);
+  if (!navAutoScrollDir) return;
+  navAutoScrollRaf = requestAnimationFrame(stepNavAutoScroll);
+}
+
+/**
+ * Keep the nav scrolling while the drag rests near its top / bottom edge.
+ * @param {number} clientY
+ */
+function updateNavAutoScroll(clientY) {
+  if (!groupNavEl || groupNavEl.hidden) {
+    stopNavAutoScroll();
+    return;
+  }
+  const box = groupNavEl.getBoundingClientRect();
+  let dir = 0;
+  if (clientY < box.top + NAV_AUTO_SCROLL_EDGE_PX) dir = -1;
+  else if (clientY > box.bottom - NAV_AUTO_SCROLL_EDGE_PX) dir = 1;
+  if (dir === navAutoScrollDir) return;
+  if (!dir) {
+    stopNavAutoScroll();
+    return;
+  }
+  navAutoScrollDir = dir;
+  if (!navAutoScrollRaf) {
+    navAutoScrollRaf = requestAnimationFrame(stepNavAutoScroll);
+  }
+}
+
+/**
+ * Spring-load: resting on a nav entry brings its group into view, so the drop
+ * result stays visible.
+ * @param {HTMLElement | null} btn
+ * @param {HTMLElement | null} section
+ */
+function scheduleNavSpringLoad(btn, section) {
+  if (!dragSession || dragSession.navHoverBtn === btn) return;
+  if (dragSession.navHoverTimer) {
+    clearTimeout(dragSession.navHoverTimer);
+    dragSession.navHoverTimer = null;
+  }
+  dragSession.navHoverBtn = btn;
+  if (!btn || !section) return;
+  dragSession.navHoverTimer = setTimeout(() => {
+    if (!dragSession) return;
+    dragSession.navHoverTimer = null;
+    scrollMainToSection(section);
+  }, NAV_SPRING_LOAD_MS);
+}
+
+/**
+ * @param {Element | null} hit
+ * @param {number} clientY
+ * @returns {boolean} handled
+ */
+function updateDropTargetFromNav(hit, clientY) {
+  const btn = hit?.closest('.group-nav-btn[data-group-id]');
+  if (!(btn instanceof HTMLElement) || !groupNavEl?.contains(btn)) {
+    scheduleNavSpringLoad(null, null);
+    stopNavAutoScroll();
+    return false;
+  }
+
+  const section = document.getElementById(btn.dataset.groupId || '');
+  const target =
+    section instanceof HTMLElement && mainEl.contains(section) ? section : null;
+  if (target && aimDropAtGroupEnd(target)) {
+    btn.classList.add('is-drop-target');
+    dragSession.viaNav = true;
+  }
+  scheduleNavSpringLoad(btn, target);
+  updateNavAutoScroll(clientY);
+  return true;
+}
+
 function updateDropTarget(clientX, clientY) {
   if (!dragSession?.active) return;
+  lastDragX = clientX;
+  lastDragY = clientY;
 
   let hit = document.elementFromPoint(clientX, clientY);
   if (hit === dragSession.ghost || dragSession.ghost?.contains(hit)) {
@@ -1442,6 +1595,11 @@ function updateDropTarget(clientX, clientY) {
   dragSession.targetFolderId = null;
   dragSession.beforeItem = null;
   dragSession.visualItems = [];
+  dragSession.viaNav = false;
+
+  if (updateDropTargetFromNav(hit instanceof Element ? hit : null, clientY)) {
+    return;
+  }
 
   const group =
     hit instanceof Element
@@ -1471,9 +1629,7 @@ function updateDropTarget(clientX, clientY) {
 
   dragSession.targetFolderId = folderId;
   dragSession.beforeItem = beforeEl ? itemRefFromEl(beforeEl) : null;
-  dragSession.visualItems = [...grid.querySelectorAll('.item[data-bookmark-id]')]
-    .map((el) => itemRefFromEl(el))
-    .filter(Boolean);
+  dragSession.visualItems = collectVisualItems(grid);
 }
 
 function activateDragSession() {
@@ -1514,6 +1670,11 @@ function cleanupDragSession() {
     clearTimeout(session.timer);
     session.timer = null;
   }
+  if (session.navHoverTimer) {
+    clearTimeout(session.navHoverTimer);
+    session.navHoverTimer = null;
+  }
+  stopNavAutoScroll();
   session.sourceEl.classList.remove('is-dragging', 'is-drag-pending');
   session.ghost?.remove();
   document.body.classList.remove('is-bookmark-dragging');
@@ -1580,6 +1741,24 @@ async function commitBookmarkMove(dragged, targetFolderId, beforeItem, visualIte
 }
 
 /**
+ * Bring the drop result into view after a drop on the left nav, where the
+ * target group is often off-screen.
+ * @param {string} draggedId
+ * @param {string} targetFolderId
+ */
+function revealAfterNavDrop(draggedId, targetFolderId) {
+  const el = mainEl.querySelector(`.item[data-bookmark-id="${draggedId}"]`);
+  if (el instanceof HTMLElement) {
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    return;
+  }
+  const section = mainEl.querySelector(
+    `section.group[data-folder-id="${targetFolderId}"]`
+  );
+  if (section instanceof HTMLElement) scrollMainToSection(section);
+}
+
+/**
  * @param {PointerEvent} event
  */
 function onDragPointerDown(event) {
@@ -1608,6 +1787,9 @@ function onDragPointerDown(event) {
     targetFolderId: null,
     beforeItem: null,
     visualItems: [],
+    viaNav: false,
+    navHoverBtn: null,
+    navHoverTimer: null,
   };
   item.classList.add('is-drag-pending');
   dragSession.timer = setTimeout(() => {
@@ -1667,8 +1849,14 @@ async function onDragPointerUp(event) {
   if (dragSession.movedSinceActive) {
     updateDropTarget(event.clientX, event.clientY);
   }
-  const { dragged, targetFolderId, beforeItem, visualItems, movedSinceActive } =
-    dragSession;
+  const {
+    dragged,
+    targetFolderId,
+    beforeItem,
+    visualItems,
+    movedSinceActive,
+    viaNav,
+  } = dragSession;
   cleanupDragSession();
 
   if (!movedSinceActive || !targetFolderId) return;
@@ -1676,6 +1864,7 @@ async function onDragPointerUp(event) {
   moveInFlight = true;
   try {
     await commitBookmarkMove(dragged, targetFolderId, beforeItem, visualItems);
+    if (viaNav) revealAfterNavDrop(dragged.id, targetFolderId);
   } catch (err) {
     console.error('Failed to move bookmark', err);
     showStatusToast('移动失败');

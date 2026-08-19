@@ -158,6 +158,7 @@ body {
   appearance: none;
   -webkit-appearance: none;
   display: block;
+  position: relative;
   border: none;
   background: transparent;
   color: var(--text);
@@ -193,6 +194,38 @@ body {
 }
 .group-nav-btn.is-folder-dragging {
   opacity: 0.35;
+}
+.group-nav-btn[data-folder-id] {
+  padding-right: 32px;
+}
+.group-nav-btn .folder-action {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.group-nav-btn:hover .folder-action,
+.group-nav-btn:focus-within .folder-action {
+  opacity: 1;
+  pointer-events: auto;
+}
+body.is-bookmark-dragging .group-nav-btn .folder-action,
+body.is-folder-dragging .group-nav-btn .folder-action {
+  opacity: 0;
+  pointer-events: none;
+}
+.group-nav-btn.is-drop-target {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .group-nav-drop-indicator {
