@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "pack": "bash scripts/pack-store.sh"
+    "pack": "bash scripts/pack-store.sh",
+    "navi:html": "node scripts/navi-to-bookmarks-html.js"
   }
 }

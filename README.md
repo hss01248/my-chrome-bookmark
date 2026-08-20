@@ -126,6 +126,7 @@ cd my-chrome-bookmark
 
 ```bash
 npm test          # Node 单测（映射 / 搜索 / favicon URL）
+npm run navi:html # 从导航站 API 生成 dist/navi-bookmarks.html（Chrome 可导入）
 npm run pack      # 打商店包 → dist/bookmark-wall-<version>.zip
 ```
 

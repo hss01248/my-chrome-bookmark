@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "书签墙",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "用 Tab + Grid 浏览书签栏",
   "permissions": ["bookmarks", "favicon"],
   "action": {
